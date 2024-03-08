@@ -11,7 +11,7 @@ class KFAC(object):
                  model: torch.nn.Module,
                  learning_rate: float,
 
-                 damping: torch.Tensor,
+                 damping: float,
                  adapt_damping: bool = False,
                  damping_adaptation_decay: float = 0.99,
                  damping_adaptation_interval: int = 5,

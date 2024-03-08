@@ -111,7 +111,7 @@ class ExtensionFisherBlock(FisherBlock):
         self.backward_hook_handle = None
 
         self.forward_hook_handle = self.module.register_forward_hook(self._forward_hook_wrapper)
-        self.backward_hook_handle = self.module.register_backward_hook(self._backward_hook_wrapper)
+        self.backward_hook_handle = self.module.register_full_backward_hook(self._backward_hook_wrapper)
 
     def _forward_hook_wrapper(self, *args):
         if self._forward_lock:

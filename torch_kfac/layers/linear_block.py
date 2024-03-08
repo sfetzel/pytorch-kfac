@@ -21,8 +21,15 @@ class FullyConnectedFisherBlock(ExtensionFisherBlock):
         self._center = False
 
     @torch.no_grad()
-    def forward_hook(self, module: Linear, inp: torch.Tensor, out: torch.Tensor) -> None:
-        x = inp[0].detach().clone().reshape(-1, self._in_features - self.has_bias).requires_grad_(False)
+    def forward_hook(self, module: Linear, input_data: torch.Tensor, output_data: torch.Tensor) -> None:
+        """
+        Captures the input data of this layer, called by torch when the forward function is executed.
+        Args:
+            module: the linear layer of which to capture the input.
+            input_data: the input data of the layer.
+            output_data: the output data of the layer.
+        """
+        x = input_data[0].detach().clone().reshape(-1, self._in_features - self.has_bias).requires_grad_(False)
         if self._activations is None:
             self._activations = x
         else:
@@ -71,7 +78,7 @@ class FullyConnectedFisherBlock(ExtensionFisherBlock):
             return mat_grads,
 
     @property
-    def has_bias(self) -> None:
+    def has_bias(self) -> bool:
         return self.module.bias is not None
 
     @property
