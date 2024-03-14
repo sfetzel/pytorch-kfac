@@ -1,4 +1,7 @@
 import unittest
+
+import torch
+
 from torch_kfac.kfac_optimizer import KFAC
 from torch_kfac.layers import FullyConnectedFisherBlock
 from torch import nn, tensor
@@ -10,8 +13,8 @@ class TestModel(nn.Module):
         super().__init__()
         self.first_linear = nn.Linear(5, 2, False)
         self.first_activation = nn.Identity()
-        self.second_linear = nn.Linear(2, 2, True)
-        self.second_activation = nn.Identity()
+        self.second_linear = nn.Linear(2, 2, False)
+        self.second_activation = nn.Tanh()
         self.layers = nn.Sequential(
             self.first_linear,
             self.first_activation,
@@ -57,18 +60,33 @@ class FullyConnectedFisherBlockTest(unittest.TestCase):
         # W1 is weight matrix of layer 1, W2 is weight matrix of layer 2.
         # L(y1, y2) = y1 + y2
         # s1 = x*W1
+        # y1 = sigma(s1)
         # s2 = s1*W2
-        # L(s2) = L(s1*W2) = L(x*W1*W2)
+        # y2 = sigma(s2)
+        # L(y2) = L(sigma(s2)) = L(sigma(s1*W2)) = L(x*W1*W2)
         L = out.sum()
         with self.optimizer.track_backward():
             L.backward()
 
-        # derivative of L(s2) with respect to s2 is [1,1].
-        assert_close(tensor([[1., 1.]]), self.optimizer.blocks[3]._sensitivities)
-        print(self.optimizer.blocks[1]._sensitivities)
+        # L(y2) = L(sigma(s2)) = sigma(s2_1) + sigma(s2_2).
+        # derivative w.r.t to s2:
+        # [sigma'(s2_1), sigma'(s2_2)]
+        out_first_layer = self.model.first_linear.forward(x)
+        out_second_layer = self.model.second_linear.forward(out_first_layer)
 
-        # derivative of L(s1*W2) with respect to s1 is column sum.
-        expected_s1 = self.model.second_linear.weight.sum(dim=0).reshape((1,2))
+        # derivative of tanh(x) is 1-tanh(x)^2.
+        expected_sensitivities_2 = 1 - torch.tanh(out_second_layer)**2
+        # derivative of L((s2_1, s2_2)) = s2_1 + s2_2 with respect to s2 is [1,1] if activation function is identity.
+        # derivative of L((s2_1, s2_2)) = s2_1 + s2_2 with respect to s2 is [L'(s2_1), L'(s2_2)] if
+        # activation function is identity.
+        assert_close(expected_sensitivities_2, self.optimizer.blocks[3]._sensitivities)
+
+        # derivative of L(y2)=L(sigma(W2 s1))=sigma((W2 s1)_1 + sigma((W2 s1)_2 with respect to s1 is
+        # [sigma'((W2 s1)_1*(W2_{00}+W2{10}), sigma'((W2 s1)_2*(W2_{01} + W2_{11})]
+        # The first factors in each entry are sigma'(W2 s1).
+        sigmas = 1 - torch.tanh(out_second_layer)**2
+        # actually the input is multiplied with W^T, therefore here we don't need to transpose.
+        expected_s1 = torch.matmul(sigmas, self.model.second_linear.weight)
         assert_close(expected_s1, self.optimizer.blocks[1]._sensitivities)
 
 
