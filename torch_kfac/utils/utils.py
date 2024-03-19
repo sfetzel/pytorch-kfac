@@ -99,7 +99,7 @@ def power_by_eig_symmetric(tensor: torch.Tensor, damping: torch.Tensor, exp: flo
 
 def inverse_by_cholesky(tensor: torch.Tensor, damping: torch.Tensor) -> torch.Tensor:
     damped = tensor + torch.eye(tensor.shape[-1], device=tensor.device, dtype=tensor.dtype) * damping
-    cholesky = torch.cholesky(damped)
+    cholesky = torch.linalg.cholesky(damped)
     return torch.cholesky_inverse(cholesky)
 
 
