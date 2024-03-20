@@ -17,7 +17,24 @@ from tqdm.auto import tqdm
 from torch_kfac import KFAC
 from torch_kfac.layers import FullyConnectedFisherBlock
 
-dev_mode = True
+dev_mode = False
+
+
+def calculate_sparsity(grad: Tensor):
+    # torch.nonzero returns the indices of the entries in the tensor, which are nonzero.
+    # num_non_zero is the count of nonzero elements in "grad".
+    num_non_zero = torch.nonzero(grad).size(0)
+    total_elements = grad.numel()
+    sparsity_ratio = 1 - (num_non_zero / total_elements)
+    sparsity_norm = grad.norm().item()
+    return sparsity_ratio, sparsity_norm
+
+
+def print_sparsity_ratio(grad: Tensor, caption: int):
+    sparsity_ratio, sparsity_norm = calculate_sparsity(grad)
+    print(f"{caption} sparsity ratio:", sparsity_ratio)
+    print(f"{caption} sparsity (norm):", sparsity_norm)
+
 
 
 def seed_everything():
@@ -90,7 +107,7 @@ class GCNConv(Module):
             self.lin.weight.data.fill_(0.1)
             self.bias.data.fill_(0.1)
         else:
-            glorot(self.weight)
+            glorot(self.lin.weight)
             if self.bias is not None:
                 self.bias.data.fill_(0)
 
@@ -148,15 +165,15 @@ class CLS(Module):
 
 
 class Net(Module):
-    def __init__(self, dataset, n_layers: int = 1):
+    def __init__(self, dataset, n_layers: int = 1, hidden_dim:int =16):
         super(Net, self).__init__()
         in_features = dataset.num_features
         self.crds = ModuleList()
         for i in range(n_layers):
-            self.crds.append(CRD(in_features, 16, 0.5))
-            in_features = 16
+            self.crds.append(CRD(in_features, hidden_dim, 0.5))
+            in_features = hidden_dim
 
-        self.cls = CLS(16, dataset.num_classes)
+        self.cls = CLS(hidden_dim, dataset.num_classes)
 
     def reset_parameters(self):
         for crd in self.crds:
@@ -213,17 +230,17 @@ def evaluate(model, data):
 if __name__ == "__main__":
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     name = "Cora"
-    dataset = Planetoid(join(dirname(__file__), '..', 'data', name), name, split="public")
+    dataset = Planetoid(join(dirname(__file__), '..', 'data', name), name, split="full")
     dataset.transform = T.NormalizeFeatures()
 
     #seed_everything()
     epochs = 200
     gamma = None
-    runs = 20
+    runs = 10
 
     val_losses, accuracies, durations = [], [], []
     for run in range(1, runs + 1):
-        model = Net(dataset)
+        model = Net(dataset, n_layers=1, hidden_dim=64)
         lr = 0.01
         weight_decay = 0.0005
         data = dataset[0].to(device)
@@ -234,7 +251,8 @@ if __name__ == "__main__":
         # damping corresponds to eps in PSGD.
         # cov_ema_decay corresponds to 1-alpha in PSGD.
         # PSGD does not implement momentum.
-        preconditioner = KFAC(model, lr, 0.01, cov_ema_decay=0.0, momentum=0)
+        preconditioner = KFAC(model, lr, 0.01 ** 0.5, momentum=0.0, damping_adaptation_decay=0,
+                              damping_adaptation_interval=1)
         linear_blocks = sum(1 for block in preconditioner.blocks if isinstance(block, FullyConnectedFisherBlock))
         print(f"Preconditioning active on {linear_blocks} blocks.")
 
@@ -248,7 +266,7 @@ if __name__ == "__main__":
             lam = (float(epoch) / float(epochs)) ** gamma if gamma is not None else 0.
             train(model, optimizer, data, preconditioner)
             eval_info = evaluate(model, data)
-            epochs_tqdm.set_description(f"Val loss:{eval_info['val loss']:.2f}")
+            epochs_tqdm.set_description(f"Val loss:{eval_info['val loss']:.2f}, Train loss: {eval_info['train loss']:.2f}")
             if best_eval_info is None or eval_info['val loss'] < best_eval_info['val loss']:
                 best_eval_info = eval_info
 

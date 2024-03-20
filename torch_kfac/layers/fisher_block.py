@@ -56,7 +56,7 @@ class FisherBlock(object):
         act_cov, sen_cov = self.activation_covariance, self.sensitivity_covariance
         a_damp, s_damp = self.compute_damping(damping, self.renorm_coeff)
         act_cov += torch.eye(act_cov.shape[0], device=a_damp.device) * a_damp
-        sen_cov += torch.eye(sen_cov.shape[0], device=a_damp.device) * s_damp
+        sen_cov += torch.eye(sen_cov.shape[0], device=s_damp.device) * s_damp
 
         mat_grads = self.grads_to_mat(grads)
         nat_grads = sen_cov @ mat_grads @ act_cov / self.renorm_coeff
