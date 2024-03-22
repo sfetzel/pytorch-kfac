@@ -11,7 +11,7 @@ class KFAC(object):
                  model: torch.nn.Module,
                  learning_rate: float,
 
-                 damping: float,
+                 damping: torch.Tensor,
                  adapt_damping: bool = False,
                  damping_adaptation_decay: float = 0.99,
                  damping_adaptation_interval: int = 5,
@@ -29,7 +29,8 @@ class KFAC(object):
 
                  update_cov_manually: bool = False,
                  center: bool = False,
-                 apply_gradients: bool = True) -> None:
+                 apply_gradients: bool = True,
+                 enable_pi_correction: bool = True) -> None:
         """Creates the KFAC Optimizer object.
 
         Args:
@@ -62,6 +63,8 @@ class KFAC(object):
             apply_gradients (bool, optional): If set to True, the gradients will be applied to the parameters according
                 to gradient descent and no further optimizer needs to be applied to the model. If set to false, you can
                 use your own first order optimizer (like Adam) to apply the gradients to the model parameters.
+            enable_pi_correction (bool, optional): If set to true, the pi-correction for the Tikhonov regularization
+                will be calculated.
         """
 
         legal_momentum_types = ['regular', 'adam']
@@ -106,6 +109,7 @@ class KFAC(object):
                 init_fisher_block(
                     module,
                     center=center,
+                    enable_pi_correction=enable_pi_correction,
                     forward_lock=self.track_forward,
                     backward_lock=self.track_backward
                 )
