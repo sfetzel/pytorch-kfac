@@ -208,26 +208,23 @@ def train(model, optimizer, data, preconditioner=None, lam=0., epoch=None):
     with preconditioner.track_backward():
         loss.backward(retain_graph=True)
 
-    train_samples = sum(data.train_mask)
+    train_nodes = sum(data.train_mask)
     for block in preconditioner.blocks:
         if isinstance(block, FullyConnectedFisherBlock):
-            # they don't filter the sensitivities or activations.
+            # PSGD doesn't filter the sensitivities or activations.
+            # block._activations = block._activations[data.train_mask]
             # block._activations = block._activations[data.train_mask]
 
-            # correct multiplication in backward hook
+            # difference: PSGD multiplies gradient in backward hook with shape[1] instead of shape[0].
             block._sensitivities = block._sensitivities / block._sensitivities.shape[0] * block._sensitivities.shape[1]
 
     preconditioner.update_cov()
 
     for block in preconditioner.blocks:
         if isinstance(block, FullyConnectedFisherBlock):
-            # they don't filter the sensitivities or activations.
-            # block._activations = block._activations[data.train_mask]
-            train_samples = sum(data.train_mask)
-            block._activations_cov.value = block._activations_cov.value * block._activations.shape[0] / train_samples
-
-            # correct denominator in covariance matrix calculation
-            block._sensitivities_cov.value = block._sensitivities_cov.value * block._sensitivities.shape[0] / train_samples
+            # The PSGD implementation does not divide by count of nodes, but by count of training nodes.
+            block._activations_cov.value = block._activations_cov.value * block._activations.shape[0] / train_nodes
+            block._sensitivities_cov.value = block._sensitivities_cov.value * block._sensitivities.shape[0] / train_nodes
 
     preconditioner.step()
     optimizer.step()
