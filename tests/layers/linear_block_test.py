@@ -11,10 +11,10 @@ from torch.testing import assert_close
 class TestModel(nn.Module):
     def __init__(self):
         super().__init__()
-        self.first_linear = nn.Linear(5, 2, False)
+        self.first_linear = nn.Linear(5, 2, True)
         self.first_activation = nn.Sigmoid()
-        self.first_activation_d = lambda x: torch.sigmoid(x)*(1 - torch.sigmoid(x)) # derivative of sigmoid
-        self.second_linear = nn.Linear(2, 2, False)
+        self.first_activation_d = lambda x: torch.sigmoid(x) * (1 - torch.sigmoid(x))  # derivative of sigmoid
+        self.second_linear = nn.Linear(2, 2, True)
         self.second_activation = nn.Tanh()
         self.second_activation_d = lambda x: 1 - torch.tanh(x) ** 2  # derivative of Tanh
         self.layers = nn.Sequential(
@@ -85,8 +85,22 @@ class FullyConnectedFisherBlockTest(unittest.TestCase):
         sigmas = self.model.first_activation_d(out_first_linear)
 
         # actually the input is multiplied with W^T, therefore here we don't need to transpose.
-        expected_s1 = self.model.first_activation_d(out_first_linear) * torch.matmul(self.model.second_activation_d(out_second_linear), self.model.second_linear.weight)
+        expected_s1 = self.model.first_activation_d(out_first_linear) * torch.matmul(
+            self.model.second_activation_d(out_second_linear), self.model.second_linear.weight)
         assert_close(expected_s1, self.optimizer.blocks[1]._sensitivities)
+
+    def test_activations_covariance_should_add_homg_coordinate(self):
+        x = tensor([[1., 2., 3., 4., 5.],
+                    [2., 3., 4., 5., 6.]])
+        with self.optimizer.track_forward():
+            self.model.forward(x)
+        self.optimizer.blocks[1]._sensitivities = tensor([[1, 2]])
+        self.optimizer.blocks[1].update_cov(0.0)
+
+        act_with_hom = tensor([[1., 2., 3., 4., 5., 1.],
+                               [2., 3., 4., 5., 6., 1.]]).T
+        expected_act_cov = (act_with_hom @ act_with_hom.T) / 2
+        assert_close(self.optimizer.blocks[1].activation_covariance, expected_act_cov)
 
 
 if __name__ == '__main__':

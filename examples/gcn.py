@@ -13,6 +13,7 @@ import torch_geometric.transforms as T
 from torch_sparse import SparseTensor, matmul
 import torch.nn.functional as F
 from tqdm.auto import tqdm
+from matplotlib import pyplot
 
 from torch_kfac import KFAC
 from torch_kfac.layers import FullyConnectedFisherBlock
@@ -34,7 +35,6 @@ def print_sparsity_ratio(grad: Tensor, caption: int):
     sparsity_ratio, sparsity_norm = calculate_sparsity(grad)
     print(f"{caption} sparsity ratio:", sparsity_ratio)
     print(f"{caption} sparsity (norm):", sparsity_norm)
-
 
 
 def seed_everything():
@@ -66,10 +66,12 @@ def seed_everything():
 
     seed_everything(seed)
 
+
 class WeightedMessagePassing(MessagePassing):
     """
     Message passing which also considers the edge weights.
     """
+
     def message(self, x_j: Tensor, edge_weight: Tensor) -> Tensor:
         r"""Constructs messages from node :math:`j` to node :math:`i`
         in analogy to :math:`\phi_{\mathbf{\Theta}}` for each edge in
@@ -95,6 +97,7 @@ class GCNConv(Module):
     A GCN Convolution layer which first executes message passing,
     then applies a linear transform.
     """
+
     def __init__(self, d_in, d_out, cached=True, bias=True):
         super(GCNConv, self).__init__()
         self.lin = Linear(d_in, d_out, bias=bias)
@@ -165,7 +168,7 @@ class CLS(Module):
 
 
 class Net(Module):
-    def __init__(self, dataset, n_layers: int = 1, hidden_dim:int =16):
+    def __init__(self, dataset, n_layers: int = 1, hidden_dim: int = 16):
         super(Net, self).__init__()
         in_features = dataset.num_features
         self.crds = ModuleList()
@@ -173,7 +176,7 @@ class Net(Module):
             self.crds.append(CRD(in_features, hidden_dim, 0.5))
             in_features = hidden_dim
 
-        self.cls = CLS(hidden_dim, dataset.num_classes)
+        self.cls = CLS(in_features, dataset.num_classes)
 
     def reset_parameters(self):
         for crd in self.crds:
@@ -187,12 +190,14 @@ class Net(Module):
         x = self.cls(x, edge_index, data.train_mask)
         return x
 
+
 # Functions train, evaluate and main are based on
 # https://github.com/russellizadi/ssp/blob/master/experiments/train_eval.py.
 
-def train(model, optimizer, data, preconditioner=None, lam=0.):
+def train(model, optimizer, data, preconditioner=None, lam=0., epoch=None):
     model.train()
     optimizer.zero_grad()
+    loss = None
     with preconditioner.track_forward():
         out = model(data)
         label = out.max(1)[1]
@@ -203,8 +208,29 @@ def train(model, optimizer, data, preconditioner=None, lam=0.):
         loss += lam * F.nll_loss(out[~data.train_mask], label[~data.train_mask])
     with preconditioner.track_backward():
         loss.backward(retain_graph=True)
-    if preconditioner:
-        preconditioner.step()
+
+    train_samples = sum(data.train_mask)
+    for block in preconditioner.blocks:
+        if isinstance(block, FullyConnectedFisherBlock):
+            # they don't filter the sensitivities or activations.
+            # block._activations = block._activations[data.train_mask]
+
+            # correct multiplication in backward hook
+            block._sensitivities = block._sensitivities / block._sensitivities.shape[0] * block._sensitivities.shape[1]
+
+    preconditioner.update_cov()
+
+    for block in preconditioner.blocks:
+        if isinstance(block, FullyConnectedFisherBlock):
+            # they don't filter the sensitivities or activations.
+            # block._activations = block._activations[data.train_mask]
+            train_samples = sum(data.train_mask)
+            block._activations_cov.value = block._activations_cov.value * block._activations.shape[0] / train_samples
+
+            # correct denominator in covariance matrix calculation
+            block._sensitivities_cov.value = block._sensitivities_cov.value * block._sensitivities.shape[0] / train_samples
+
+    preconditioner.step()
     optimizer.step()
 
 
@@ -230,17 +256,17 @@ def evaluate(model, data):
 if __name__ == "__main__":
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     name = "Cora"
-    dataset = Planetoid(join(dirname(__file__), '..', 'data', name), name, split="full")
+    dataset = Planetoid(join(dirname(__file__), '..', 'data', name), name, split="public")
     dataset.transform = T.NormalizeFeatures()
 
-    #seed_everything()
+    seed_everything()
     epochs = 200
     gamma = None
-    runs = 10
+    runs = 1
 
     val_losses, accuracies, durations = [], [], []
     for run in range(1, runs + 1):
-        model = Net(dataset, n_layers=1, hidden_dim=64)
+        model = Net(dataset, n_layers=1, hidden_dim=16)
         lr = 0.01
         weight_decay = 0.0005
         data = dataset[0].to(device)
@@ -251,8 +277,9 @@ if __name__ == "__main__":
         # damping corresponds to eps in PSGD.
         # cov_ema_decay corresponds to 1-alpha in PSGD.
         # PSGD does not implement momentum.
-        preconditioner = KFAC(model, lr, 0.01 ** 0.5, momentum=0.0, damping_adaptation_decay=0,
-                              damping_adaptation_interval=1)
+        preconditioner = KFAC(model, lr, 0.01, momentum=0.0, damping_adaptation_decay=0,
+                              cov_ema_decay=0.0, apply_gradients=False,
+                              damping_adaptation_interval=1, update_cov_manually=True)
         linear_blocks = sum(1 for block in preconditioner.blocks if isinstance(block, FullyConnectedFisherBlock))
         print(f"Preconditioning active on {linear_blocks} blocks.")
 
@@ -264,9 +291,10 @@ if __name__ == "__main__":
         epochs_tqdm = tqdm(range(1, epochs + 1))
         for epoch in epochs_tqdm:
             lam = (float(epoch) / float(epochs)) ** gamma if gamma is not None else 0.
-            train(model, optimizer, data, preconditioner)
+            train(model, optimizer, data, preconditioner, epoch=epoch)
             eval_info = evaluate(model, data)
-            epochs_tqdm.set_description(f"Val loss:{eval_info['val loss']:.2f}, Train loss: {eval_info['train loss']:.2f}")
+            epochs_tqdm.set_description(
+                f"Val loss:{eval_info['val loss']:.2f}, Train loss: {eval_info['train loss']:.2f}")
             if best_eval_info is None or eval_info['val loss'] < best_eval_info['val loss']:
                 best_eval_info = eval_info
 
@@ -282,6 +310,6 @@ if __name__ == "__main__":
     loss, acc, duration = tensor(val_losses), tensor(accuracies), tensor(durations)
     print('Val Loss: {:.4f}, Test Accuracy: {:.2f} ± {:.2f}, Duration: {:.3f} \n'.
           format(loss.mean().item(),
-                 100*acc.mean().item(),
-                 100*acc.std().item(),
+                 100 * acc.mean().item(),
+                 100 * acc.std().item(),
                  duration.mean().item()))
