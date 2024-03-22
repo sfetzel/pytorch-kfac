@@ -13,7 +13,6 @@ import torch_geometric.transforms as T
 from torch_sparse import SparseTensor, matmul
 import torch.nn.functional as F
 from tqdm.auto import tqdm
-from matplotlib import pyplot
 
 from torch_kfac import KFAC
 from torch_kfac.layers import FullyConnectedFisherBlock
@@ -277,8 +276,8 @@ if __name__ == "__main__":
         # damping corresponds to eps in PSGD.
         # cov_ema_decay corresponds to 1-alpha in PSGD.
         # PSGD does not implement momentum.
-        preconditioner = KFAC(model, lr, 0.01, momentum=0.0, damping_adaptation_decay=0,
-                              cov_ema_decay=0.0, apply_gradients=False,
+        preconditioner = KFAC(model, 0, 0.01, momentum=0.0, damping_adaptation_decay=0,
+                              cov_ema_decay=0.0, enable_pi_correction=False,
                               damping_adaptation_interval=1, update_cov_manually=True)
         linear_blocks = sum(1 for block in preconditioner.blocks if isinstance(block, FullyConnectedFisherBlock))
         print(f"Preconditioning active on {linear_blocks} blocks.")
