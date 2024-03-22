@@ -209,24 +209,27 @@ def train(model, optimizer, data, preconditioner=None, lam=0., epoch=None):
         loss.backward(retain_graph=True)
 
     train_nodes = sum(data.train_mask)
-    for block in preconditioner.blocks:
-        if isinstance(block, FullyConnectedFisherBlock):
-            # PSGD doesn't filter the sensitivities or activations.
-            # block._activations = block._activations[data.train_mask]
-            # block._activations = block._activations[data.train_mask]
+    update = epoch % 50 == 0
+    if update:
+        for block in preconditioner.blocks:
+            if isinstance(block, FullyConnectedFisherBlock):
+                # PSGD doesn't filter the sensitivities or activations.
+                # block._activations = block._activations[data.train_mask]
+                # block._activations = block._activations[data.train_mask]
 
-            # difference: PSGD multiplies gradient in backward hook with shape[1] instead of shape[0].
-            block._sensitivities = block._sensitivities / block._sensitivities.shape[0] * block._sensitivities.shape[1]
+                # difference: PSGD multiplies gradient in backward hook with shape[1] instead of shape[0].
+                block._sensitivities = block._sensitivities / block._sensitivities.shape[0] * \
+                                       block._sensitivities.shape[1]
 
-    preconditioner.update_cov()
+        preconditioner.update_cov()
 
-    for block in preconditioner.blocks:
-        if isinstance(block, FullyConnectedFisherBlock):
-            # The PSGD implementation does not divide by count of nodes, but by count of training nodes.
-            block._activations_cov.value = block._activations_cov.value * block._activations.shape[0] / train_nodes
-            block._sensitivities_cov.value = block._sensitivities_cov.value * block._sensitivities.shape[0] / train_nodes
+        for block in preconditioner.blocks:
+            if isinstance(block, FullyConnectedFisherBlock):
+                # The PSGD implementation does not divide by count of nodes, but by count of training nodes.
+                block._activations_cov.value = block._activations_cov.value * block._activations.shape[0] / train_nodes
+                block._sensitivities_cov.value = block._sensitivities_cov.value * block._sensitivities.shape[0] / train_nodes
 
-    preconditioner.step()
+    preconditioner.step(update_inverses=update)
     optimizer.step()
 
 
@@ -286,8 +289,7 @@ if __name__ == "__main__":
         best_eval_info = None
         epochs_tqdm = tqdm(range(1, epochs + 1))
         for epoch in epochs_tqdm:
-            lam = (float(epoch) / float(epochs)) ** gamma if gamma is not None else 0.
-            train(model, optimizer, data, preconditioner, epoch=epoch)
+            train(model, optimizer, data, preconditioner, epoch=epoch-1)
             eval_info = evaluate(model, data)
             epochs_tqdm.set_description(
                 f"Val loss:{eval_info['val loss']:.2f}, Train loss: {eval_info['train loss']:.2f}")
