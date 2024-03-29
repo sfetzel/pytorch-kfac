@@ -54,7 +54,7 @@ class FullyConnectedFisherBlock(ExtensionFisherBlock):
         if self._center:
             act = center(act)
             sen = center(sen)
-        
+
         if self.has_bias:
             act = append_homog(act)
 
@@ -62,6 +62,8 @@ class FullyConnectedFisherBlock(ExtensionFisherBlock):
         sensitivity_cov = compute_cov(sen)
         self._activations_cov.add_to_average(activation_cov, cov_ema_decay)
         self._sensitivities_cov.add_to_average(sensitivity_cov, cov_ema_decay)
+        self._sensitivities = None
+        self._activations = None
 
     def grads_to_mat(self, grads: Iterable[torch.Tensor]) -> torch.Tensor:
         if self.has_bias:
