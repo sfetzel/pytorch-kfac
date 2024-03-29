@@ -1,3 +1,4 @@
+# based on https://pytorch-geometric.readthedocs.io/en/latest/_modules/torch_geometric/nn/conv/gat_conv.html#GATConv
 import typing
 from typing import Optional, Tuple, Union
 
@@ -7,7 +8,7 @@ from torch import Tensor
 from torch.nn import Parameter
 
 from torch_geometric.nn.conv import MessagePassing
-from torch_geometric.nn.dense.linear import Linear
+from torch.nn import Linear
 from torch_geometric.nn.inits import glorot, zeros
 from torch_geometric.typing import (
     Adj,
@@ -157,21 +158,21 @@ class GATConv(MessagePassing):
         # transformations 'lin_src' and 'lin_dst' to source and target nodes:
         self.lin = self.lin_src = self.lin_dst = None
         if isinstance(in_channels, int):
-            self.lin = Linear(in_channels, heads * out_channels, bias=False,
-                              weight_initializer='glorot')
+            self.lin = Linear(in_channels, heads * out_channels, bias=False)
         else:
-            self.lin_src = Linear(in_channels[0], heads * out_channels, False,
-                                  weight_initializer='glorot')
-            self.lin_dst = Linear(in_channels[1], heads * out_channels, False,
-                                  weight_initializer='glorot')
+            self.lin_src = Linear(in_channels[0], heads * out_channels, False)
+            self.lin_dst = Linear(in_channels[1], heads * out_channels, False)
 
         # The learnable parameters to compute attention coefficients:
-        self.att_src = Parameter(torch.empty(1, heads, out_channels))
-        self.att_dst = Parameter(torch.empty(1, heads, out_channels))
+        # att_src had size [1, heads, out_channels].
+        # will be multiplied from left with x_src of shape [N, H, C]
+        #self.att_src = Parameter(torch.empty(1, heads, out_channels))
+        self.att_src = Linear(out_channels, heads, bias=False)
+        self.att_dst = Linear(out_channels, heads, bias=False)
+        #self.att_dst = Parameter(torch.empty(1, heads, out_channels))
 
         if edge_dim is not None:
-            self.lin_edge = Linear(edge_dim, heads * out_channels, bias=False,
-                                   weight_initializer='glorot')
+            self.lin_edge = Linear(edge_dim, heads * out_channels, bias=False)
             self.att_edge = Parameter(torch.empty(1, heads, out_channels))
         else:
             self.lin_edge = None
@@ -189,15 +190,19 @@ class GATConv(MessagePassing):
     def reset_parameters(self):
         super().reset_parameters()
         if self.lin is not None:
-            self.lin.reset_parameters()
+            glorot(self.lin.weight)
+            glorot(self.lin.bias)
         if self.lin_src is not None:
-            self.lin_src.reset_parameters()
+            glorot(self.lin_src.weight)
+            glorot(self.lin_src.bias)
         if self.lin_dst is not None:
-            self.lin_dst.reset_parameters()
+            glorot(self.lin_dst.weight)
         if self.lin_edge is not None:
-            self.lin_edge.reset_parameters()
-        glorot(self.att_src)
-        glorot(self.att_dst)
+            glorot(self.lin_edge.weight)
+        #glorot(self.att_src.weight)
+        #glorot(self.att_dst.weight)
+        self.att_src.reset_parameters()
+        self.att_dst.reset_parameters()
         glorot(self.att_edge)
         zeros(self.bias)
 
@@ -308,8 +313,8 @@ class GATConv(MessagePassing):
 
         # Next, we compute node-level attention coefficients, both for source
         # and target nodes (if present):
-        alpha_src = (x_src * self.att_src).sum(dim=-1)
-        alpha_dst = None if x_dst is None else (x_dst * self.att_dst).sum(-1)
+        alpha_src = (self.att_src(x_src)).sum(dim=-1)
+        alpha_dst = None if x_dst is None else (self.att_dst(x_dst)).sum(-1)
         alpha = (alpha_src, alpha_dst)
 
         if self.add_self_loops:
