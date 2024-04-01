@@ -6,7 +6,7 @@ from collections import defaultdict
 import requests
 import argparse
 import numpy as np
-from tqdm import tqdm
+from tqdm.auto import tqdm
 from sklearn.model_selection import StratifiedKFold
 
 from torch.optim import Adam
@@ -21,6 +21,9 @@ from torch_geometric.utils import degree
 from torch_geometric.datasets import TUDataset
 from torch_geometric.loader import DataLoader
 from gin import GIN
+from torch_kfac import KFAC
+from torch_kfac.layers import FullyConnectedFisherBlock
+
 
 class Patience:
     """
@@ -66,11 +69,20 @@ class Patience:
                 return self.counter >= self.patience
 
 
-def train(model, data, y, criterion, optimizer, scheduler):
-    output = model(data.x, data.edge_index, data.batch)
-    loss_train = criterion(output, y.to(output.device))
+def train(model, data, y, criterion, optimizer, scheduler, preconditioner, enable_preconditioner):
     optimizer.zero_grad()
-    loss_train.backward()
+    with preconditioner.track_forward():
+        output = model(data.x, data.edge_index, data.batch)
+        loss_train = criterion(output, y.to(output.device))
+    with preconditioner.track_backward():
+        loss_train.backward()
+
+    if enable_preconditioner:
+        try:
+            preconditioner.step()
+        except AssertionError:
+            print("Problem in KFAC preconditioner! Continuing without")
+
     optimizer.step()
     scheduler.step()
     return output, loss_train
@@ -83,13 +95,14 @@ def eval(model, data, y, criterion):
     return output, loss_test
 
 
-def train_and_validate_model(model, train_loader, val_loader, criterion, optimizer, scheduler, device):
+def train_and_validate_model(model, train_loader, val_loader, criterion, optimizer, scheduler, device, preconditioner,
+                             enable_preconditioner):
     train_loss = 0
     train_correct = 0
     model.train()
     for idx, data in enumerate(train_loader):
         data = data.to(device)
-        output, loss = train(model, data, data.y, criterion, optimizer, scheduler)
+        output, loss = train(model, data, data.y, criterion, optimizer, scheduler, preconditioner, enable_preconditioner)
         train_loss += loss.item() * data.num_graphs
         prediction = output.max(1)[1].type_as(data.y)
         train_correct += prediction.eq(data.y.double()).sum().item()
@@ -162,18 +175,17 @@ def compute_max_degree(dataset):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument("--dataset_name", type=str, default="REDDIT-BINARY") #REDDIT-BINARY
-    parser.add_argument("--dim_embeddings", type=int, nargs="+", default=[32, 64])
-    parser.add_argument("--lrs", type=float, nargs="+", default=[0.01,1e-3])
-    #parser.add_argument("--kfac_damping", type=float, nargs="+", default=[0, 0.01, 1e-8])
+    parser.add_argument("--dataset_name", type=str, default="ENZYMES") #REDDIT-BINARY
+    parser.add_argument("--dim_embeddings", type=int, nargs="+", default=[16, 32, 64]) # 32, 64
+    parser.add_argument("--lrs", type=float, nargs="+", default=[0.01, 1e-3]) # 0.01, 1e-3
+    parser.add_argument("--layers", type=int, nargs="+", default=[1, 2, 3, 4]) # 1, 2, 3, 4
+    parser.add_argument("--kfac_damping", type=float, nargs="+", default=[None, 0.1, 0.01, 1e-7]) # None, 0.01, 1e-7
 
     parser.add_argument("--epochs", type=int, default=500)
     parser.add_argument("--runs", type=int, default=3)
-    # todo: add argument for kfac optimizer (bool), # of layers, ..
     parser.add_argument("--patience", type=int, default=250)
     parser.add_argument("--step_size", type=int, default=100)
     parser.add_argument("--batch_size", type=int, default=128)
-    parser.add_argument("--num_bits", type=int, default=8)
     parser.add_argument("--device", type=str, default="cuda" if cuda.is_available() else "cpu")
     args = parser.parse_args()
 
@@ -226,6 +238,7 @@ if __name__ == '__main__':
 
     np.random.seed(10)
     torch_random.manual_seed(10)
+    preconditioner_args = {"momentum": 0}
 
     for it in range(10):
         # it corresponds to the fold.
@@ -239,64 +252,76 @@ if __name__ == '__main__':
         best_acc_across_folds = -float(np.inf)
         best_loss_across_folds = float(np.inf)
         # todo add new hyperparameters: damping, could also add dropout, number of layers, ..
-        n_params = len(args.dim_embeddings) * len(args.lrs)
+        n_params = len(args.dim_embeddings) * len(args.lrs) * len(args.kfac_damping) * len(args.layers)
         model_selection_epochs = args.epochs
         if n_params == 1:
             print(f"Only one configuration to search for, skipping model selection (train for one epoch)")
             model_selection_epochs = 1
         for lr in args.lrs:
             for dim_embedding in args.dim_embeddings:
+                for kfac_damping in args.kfac_damping:
+                    for layers in args.layers:
 
-                ################################
-                #       MODEL SELECTION       #
-                ###############################
-                train_loader, val_loader, test_loader = get_train_val_test_loaders(dataset,
-                                                                                   train_index,
-                                                                                   val_index,
-                                                                                   test_index,
-                                                                                   )
+                        ################################
+                        #       MODEL SELECTION       #
+                        ###############################
+                        train_loader, val_loader, test_loader = get_train_val_test_loaders(dataset,
+                                                                                           train_index,
+                                                                                           val_index,
+                                                                                           test_index,
+                                                                                           )
 
-                early_stopper = Patience(patience=args.patience, use_loss=False)
-                params = {"dim_embedding": dim_embedding, "lr": lr} # todo dont forget to add hyperparameters here.
+                        early_stopper = Patience(patience=args.patience, use_loss=False)
+                        # dont forget to add hyperparameters here.
+                        params = {"dim_embedding": dim_embedding, "lr": lr,
+                                  "layers": layers, "kfac_damping": kfac_damping}
 
-                best_val_loss, best_val_acc = float("inf"), 0
-                epoch, val_loss, val_acc = 0, float("inf"), 0
+                        best_val_loss, best_val_acc = float("inf"), 0
+                        epoch, val_loss, val_acc = 0, float("inf"), 0
 
-                # todo add num layers to args.
-                model = GIN(in_channels=features_dim, num_layers=1,
-                            hidden_channels=dim_embedding,
-                            out_channels=n_classes)
+                        # todo add num layers to args.
+                        model = GIN(in_channels=features_dim, num_layers=layers,
+                                    hidden_channels=dim_embedding,
+                                    out_channels=n_classes)
 
-                model = model.to(device)
+                        model = model.to(device)
 
-                print(f"Model # Parameters {sum([p.numel() for p in model.parameters()])}")
-                optimizer = Adam(model.parameters(), lr=lr)
-                scheduler = StepLR(optimizer, step_size=args.step_size, gamma=0.5)
+                        print(f"Model # Parameters {sum([p.numel() for p in model.parameters()])}")
+                        optimizer = Adam(model.parameters(), lr=lr)
+                        scheduler = StepLR(optimizer, step_size=args.step_size, gamma=0.5)
+                        preconditioner = KFAC(model, 0, kfac_damping if kfac_damping is not None else 0, **preconditioner_args)
+                        if kfac_damping is not None:
+                            linear_blocks = sum(1 for block in preconditioner.blocks if isinstance(block, FullyConnectedFisherBlock))
+                            print(f"Preconditioning active on {linear_blocks} blocks.")
+                        else:
+                            print("Preconditioning inactive.")
 
-                pbar_train = tqdm(range(model_selection_epochs), desc="Epoch 0 Loss 0")
-                for epoch in pbar_train:
-                    train_acc, train_loss, val_acc, val_loss = train_and_validate_model(model, train_loader,
-                                                                                        val_loader, criterion,
-                                                                                        optimizer, scheduler,
-                                                                                        device,
-                                                                                        )
+                        pbar_train = tqdm(range(model_selection_epochs), desc="Epoch 0 Loss 0")
+                        for epoch in pbar_train:
+                            train_acc, train_loss, val_acc, val_loss = train_and_validate_model(model, train_loader,
+                                                                                                val_loader, criterion,
+                                                                                                optimizer, scheduler,
+                                                                                                device,
+                                                                                                preconditioner,
+                                                                                                kfac_damping is not None and epoch > 50
+                                                                                                )
 
-                    if early_stopper.stop(epoch, val_loss, val_acc):
-                        break
+                            if early_stopper.stop(epoch, val_loss, val_acc):
+                                break
 
-                    best_acc_across_folds = early_stopper.val_acc if early_stopper.val_acc > best_acc_across_folds else best_acc_across_folds
-                    best_loss_across_folds = early_stopper.val_loss if early_stopper.val_loss < best_loss_across_folds else best_loss_across_folds
+                            best_acc_across_folds = early_stopper.val_acc if early_stopper.val_acc > best_acc_across_folds else best_acc_across_folds
+                            best_loss_across_folds = early_stopper.val_loss if early_stopper.val_loss < best_loss_across_folds else best_loss_across_folds
 
-                    pbar_train.set_description(f"MS {loop_counter}/{n_params} Epoch {epoch + 1} Val loss {val_loss:0.2f} Val acc {val_acc:0.1f} Best Val Loss {early_stopper.val_loss:0.2f} Best Val Acc {early_stopper.val_acc:0.1f} Best Fold Val Acc  {best_acc_across_folds:0.1f} Best Fold Val Loss {best_loss_across_folds:0.2f}")
+                            pbar_train.set_description(f"MS {loop_counter}/{n_params} Epoch {epoch + 1} Val loss {val_loss:0.2f} Val acc {val_acc:0.1f} Best Val Loss {early_stopper.val_loss:0.2f} Best Val Acc {early_stopper.val_acc:0.1f} Best Fold Val Acc  {best_acc_across_folds:0.1f} Best Fold Val Loss {best_loss_across_folds:0.2f}")
 
-                best_val_loss, best_val_acc = early_stopper.val_loss, early_stopper.val_acc
+                        best_val_loss, best_val_acc = early_stopper.val_loss, early_stopper.val_acc
 
-                result_dict["config"].append(params)
-                result_dict["best_val_acc"].append(best_val_acc)
-                result_dict["best_val_loss"].append(best_val_loss)
-                print(f"MS {loop_counter}/{n_params} Epoch {epoch + 1} Best Epoch {early_stopper.best_epoch} Val acc {val_acc:0.1f} Best Val Acc {best_val_acc:0.2f} Best Fold Val Acc  {best_acc_across_folds:0.2f} Best Fold Val Loss {best_loss_across_folds:0.2f}")
+                        result_dict["config"].append(params)
+                        result_dict["best_val_acc"].append(best_val_acc)
+                        result_dict["best_val_loss"].append(best_val_loss)
+                        print(f"MS {loop_counter}/{n_params} Epoch {epoch + 1} Best Epoch {early_stopper.best_epoch} Val acc {val_acc:0.1f} Best Val Acc {best_val_acc:0.2f} Best Fold Val Acc  {best_acc_across_folds:0.2f} Best Fold Val Loss {best_loss_across_folds:0.2f}")
 
-                loop_counter += 1
+                        loop_counter += 1
 
         # Free memory after model selection
         del model
@@ -310,20 +335,22 @@ if __name__ == '__main__':
         best_i = np.argmax(result_dict["best_val_acc"])
         best_config = result_dict["config"][best_i]
         best_val_acc = result_dict["best_val_acc"][best_i]
+        print(best_config)
         print(f"Winner of Model Selection | hidden dim: {best_config['dim_embedding']} | lr {best_config['lr']}")
         print(f"Winner Best Val Accuracy {result_dict['best_val_acc'][best_i]:0.2f}")
-
         loop_counter = 1
         test_accuracies = []
         for _ in range(args.runs):
             # use best_config here!
-            model = GIN(in_channels=features_dim, num_layers=1,
-                                        hidden_channels=dim_embedding,
+            model = GIN(in_channels=features_dim, num_layers=best_config["layers"],
+                                        hidden_channels=best_config["dim_embedding"],
                                         out_channels=n_classes)
 
             model = model.to(device)
             optimizer = Adam(model.parameters(), lr=best_config["lr"])
             scheduler = StepLR(optimizer, step_size=args.step_size, gamma=0.5)
+            kfac_damping = best_config["kfac_damping"]
+            preconditioner = KFAC(model, 0, kfac_damping, **preconditioner_args)
 
             save_path = os.path.join("models", args.dataset_name, "model_best" + ".pth.tar")
             early_stopper = Patience(patience=args.patience, use_loss=False, save_path=save_path)
@@ -333,7 +360,8 @@ if __name__ == '__main__':
             for epoch in pbar_train:
                 train_acc, train_loss, val_acc, val_loss = train_and_validate_model(model, train_loader, val_loader,
                                                                                     criterion, optimizer, scheduler,
-                                                                                    device)
+                                                                                    device, preconditioner,
+                                                                                    kfac_damping is not None)
 
                 if early_stopper.stop(epoch, val_loss, val_acc, model=model):
                     break

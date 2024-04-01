@@ -15,40 +15,7 @@ from torch_geometric.nn import MLP, GINConv, global_add_pool, BatchNorm
 from torch_kfac import KFAC
 from torch_kfac.layers import FullyConnectedFisherBlock
 
-parser = argparse.ArgumentParser()
-parser.add_argument('--dataset', type=str, default='PROTEINS') # MUTAG
-parser.add_argument('--batch_size', type=int, default=128)
-parser.add_argument('--hidden_channels', type=int, default=32)
-parser.add_argument('--num_layers', type=int, default=5)
-parser.add_argument('--lr', type=float, default=0.01)
-parser.add_argument('--epochs', type=int, default=100)
-parser.add_argument('--wandb', action='store_true', help='Track experiment')
-parser.add_argument('--kfac', action='store_true', default=False)
-args = parser.parse_args()
 
-if torch.cuda.is_available():
-    device = torch.device('cuda')
-elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
-    # MPS is currently slower than CPU due to missing int64 min/max ops
-    device = torch.device('cpu')
-else:
-    device = torch.device('cpu')
-
-init_wandb(
-    name=f'GIN-{args.dataset}',
-    batch_size=args.batch_size,
-    lr=args.lr,
-    epochs=args.epochs,
-    hidden_channels=args.hidden_channels,
-    num_layers=args.num_layers,
-    device=device,
-)
-
-path = osp.join(osp.dirname(osp.realpath(__file__)), '..', 'data', 'TU')
-dataset = TUDataset(path, name=args.dataset).shuffle()
-
-train_loader = DataLoader(dataset[:0.9], args.batch_size, shuffle=True)
-test_loader = DataLoader(dataset[0.9:], args.batch_size)
 
 
 class GIN(torch.nn.Module):
@@ -115,33 +82,69 @@ def test(loader):
         total_correct += int((pred == data.y).sum())
     return total_correct / len(loader.dataset)
 
-test_accuracies = []
-runs = 20
-for run in range(runs):
-    model = GIN(
-        in_channels=dataset.num_features,
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--dataset', type=str, default='PROTEINS')  # MUTAG
+    parser.add_argument('--batch_size', type=int, default=128)
+    parser.add_argument('--hidden_channels', type=int, default=32)
+    parser.add_argument('--num_layers', type=int, default=5)
+    parser.add_argument('--lr', type=float, default=0.01)
+    parser.add_argument('--epochs', type=int, default=100)
+    parser.add_argument('--wandb', action='store_true', help='Track experiment')
+    parser.add_argument('--kfac', action='store_true', default=False)
+    args = parser.parse_args()
+
+    if torch.cuda.is_available():
+        device = torch.device('cuda')
+    elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+        # MPS is currently slower than CPU due to missing int64 min/max ops
+        device = torch.device('cpu')
+    else:
+        device = torch.device('cpu')
+
+    init_wandb(
+        name=f'GIN-{args.dataset}',
+        batch_size=args.batch_size,
+        lr=args.lr,
+        epochs=args.epochs,
         hidden_channels=args.hidden_channels,
-        out_channels=dataset.num_classes,
         num_layers=args.num_layers,
-    ).to(device)
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
-    preconditioner = KFAC(model, 0, 1e-7, cov_ema_decay=0.85, momentum=0, update_cov_manually=True)
+        device=device,
+    )
 
-    if args.kfac:
-        linear_blocks = sum(1 for block in preconditioner.blocks if isinstance(block, FullyConnectedFisherBlock))
-        print(f"Preconditioning active on {linear_blocks} blocks.")
+    path = osp.join(osp.dirname(osp.realpath(__file__)), '..', 'data', 'TU')
+    dataset = TUDataset(path, name=args.dataset).shuffle()
 
-    times = []
-    best_test_acc = 0.
-    for epoch in range(args.epochs):
-        start = time.time()
-        loss = train(epoch)
-        train_acc = test(train_loader)
-        test_acc = test(test_loader)
-        log(Epoch=epoch, Loss=loss, Train=train_acc, Test=test_acc)
-        times.append(time.time() - start)
-        best_test_acc = max(best_test_acc, test_acc)
-    test_accuracies.append(best_test_acc)
-    print(f'Median time per epoch: {torch.tensor(times).median():.4f}s, Best test accuracy: {best_test_acc*100:.2f}%')
+    train_loader = DataLoader(dataset[:0.9], args.batch_size, shuffle=True)
+    test_loader = DataLoader(dataset[0.9:], args.batch_size)
 
-print(f'Test accuracy: {numpy.mean(test_accuracies)*100:.2f}%±{numpy.std(test_accuracies)*100:.2f}%')
+    test_accuracies = []
+    runs = 20
+    for run in range(runs):
+        model = GIN(
+            in_channels=dataset.num_features,
+            hidden_channels=args.hidden_channels,
+            out_channels=dataset.num_classes,
+            num_layers=args.num_layers,
+        ).to(device)
+        optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
+        preconditioner = KFAC(model, 0, 1e-7, cov_ema_decay=0.85, momentum=0, update_cov_manually=True)
+
+        if args.kfac:
+            linear_blocks = sum(1 for block in preconditioner.blocks if isinstance(block, FullyConnectedFisherBlock))
+            print(f"Preconditioning active on {linear_blocks} blocks.")
+
+        times = []
+        best_test_acc = 0.
+        for epoch in range(args.epochs):
+            start = time.time()
+            loss = train(epoch)
+            train_acc = test(train_loader)
+            test_acc = test(test_loader)
+            log(Epoch=epoch, Loss=loss, Train=train_acc, Test=test_acc)
+            times.append(time.time() - start)
+            best_test_acc = max(best_test_acc, test_acc)
+        test_accuracies.append(best_test_acc)
+        print(f'Median time per epoch: {torch.tensor(times).median():.4f}s, Best test accuracy: {best_test_acc*100:.2f}%')
+
+    print(f'Test accuracy: {numpy.mean(test_accuracies)*100:.2f}%±{numpy.std(test_accuracies)*100:.2f}%')
