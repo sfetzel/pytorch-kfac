@@ -80,7 +80,7 @@ def train(model, data, y, criterion, optimizer, scheduler, preconditioner, enabl
     if enable_preconditioner:
         try:
             preconditioner.step()
-        except AssertionError:
+        except:
             print("Problem in KFAC preconditioner! Continuing without")
 
     optimizer.step()
@@ -350,7 +350,7 @@ if __name__ == '__main__':
             optimizer = Adam(model.parameters(), lr=best_config["lr"])
             scheduler = StepLR(optimizer, step_size=args.step_size, gamma=0.5)
             kfac_damping = best_config["kfac_damping"]
-            preconditioner = KFAC(model, 0, kfac_damping, **preconditioner_args)
+            preconditioner = KFAC(model, 0, kfac_damping if kfac_damping is not None else 0, **preconditioner_args)
 
             save_path = os.path.join("models", args.dataset_name, "model_best" + ".pth.tar")
             early_stopper = Patience(patience=args.patience, use_loss=False, save_path=save_path)
