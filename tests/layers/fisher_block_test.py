@@ -5,7 +5,6 @@ from numpy import sqrt
 from torch import tensor, float64, allclose, device
 
 from torch_kfac.layers import FisherBlock
-from torch_kfac.utils import inverse_by_cholesky
 
 
 class FisherBlockTest(unittest.TestCase):
@@ -36,27 +35,23 @@ class FisherBlockTest(unittest.TestCase):
     def test_inverse_calculation_check_sensitivities(self):
         block = self.get_test_block()
         damping = 1e-1
-        a_damp, s_damp = block.compute_damping(tensor(damping), block.renorm_coeff)
-        sen_cov_inverse = inverse_by_cholesky(self.sen_cov, s_damp)
-
+        block.update_cov_inv(tensor(damping))
         expected_sens_cov_inv = tensor([[1.8624, -0.4362, -0.4530],
                                         [-0.4362, 1.5436, -0.7047],
                                         [-0.4530, -0.7047, 1.1913]], dtype=float64)
 
-        self.assertTrue(allclose(expected_sens_cov_inv, sen_cov_inverse, rtol=1e-4))
+        self.assertTrue(allclose(expected_sens_cov_inv, block._sensitivities_cov_inv, rtol=1e-4))
 
     def test_inverse_calculation_check_activations(self):
         block = self.get_test_block()
         damping = 1e-1
-        a_damp, s_damp = block.compute_damping(tensor(damping), block.renorm_coeff)
-
-        act_cov_inverse = inverse_by_cholesky(self.act_cov, a_damp)
+        block.update_cov_inv(tensor(damping))
 
         expected_act_cov_inv = tensor([[3.7395, -0.3721, -0.7814],
                                        [-0.3721, 2.3256, -1.1163],
                                        [-0.7814, -1.1163, 1.6558]], dtype=float64)
 
-        self.assertTrue(allclose(expected_act_cov_inv, act_cov_inverse, rtol=1e-4))
+        self.assertTrue(allclose(expected_act_cov_inv, block._activations_cov_inv, rtol=1e-4))
 
 
 if __name__ == '__main__':
