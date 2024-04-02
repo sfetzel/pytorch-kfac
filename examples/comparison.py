@@ -11,19 +11,36 @@ from sklearn.model_selection import StratifiedKFold
 
 from torch.optim import Adam
 from torch import no_grad, cuda, long, device as torch_device, random as torch_random, load, save
+import torch.nn.functional as F
 from torch.optim.lr_scheduler import StepLR
 from torch.nn import Module, CrossEntropyLoss
 from torch_geometric.transforms import OneHotDegree
+from torch_geometric.nn import global_add_pool
 
-
-from torch_geometric.nn import global_max_pool
 from torch_geometric.utils import degree
 from torch_geometric.datasets import TUDataset
 from torch_geometric.loader import DataLoader
+
+from examples.gat import GAT
+from examples.gat_conv import GATConv
 from gin import GIN
 from torch_kfac import KFAC
 from torch_kfac.layers import FullyConnectedFisherBlock
 
+class GAT(Module):
+    def __init__(self, in_channels, hidden_channels, out_channels, heads):
+        super().__init__()
+        self.conv1 = GATConv(in_channels, hidden_channels, heads, dropout=0.6)
+        self.conv2 = GATConv(hidden_channels * heads, out_channels, heads=1,
+                             concat=False, dropout=0.6)
+
+    def forward(self, x, edge_index, batch):
+        x = F.dropout(x, p=0.6, training=self.training)
+        x = F.elu(self.conv1(x, edge_index))
+        x = F.dropout(x, p=0.6, training=self.training)
+        x = self.conv2(x, edge_index)
+        x = global_add_pool(x, batch)
+        return x
 
 class Patience:
     """
@@ -173,13 +190,27 @@ def compute_max_degree(dataset):
     return max_degree
 
 
+def get_model(model_str: str, args, dataset, hidden_channels, num_layers) -> Module:
+    if model_str == "GIN":
+        return GIN(
+            in_channels=dataset.num_features,
+            hidden_channels=hidden_channels,
+            out_channels=dataset.num_classes,
+            num_layers=num_layers,
+        )
+    elif model_str == "GAT":
+        return GAT(in_channels=dataset.num_features,
+                   hidden_channels=hidden_channels,
+                   out_channels=dataset.num_classes,
+                   heads=args.heads)
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset_name", type=str, default="ENZYMES") #REDDIT-BINARY
     parser.add_argument("--dim_embeddings", type=int, nargs="+", default=[16, 32, 64]) # 32, 64
     parser.add_argument("--lrs", type=float, nargs="+", default=[0.01, 1e-3]) # 0.01, 1e-3
     parser.add_argument("--layers", type=int, nargs="+", default=[1, 2, 3, 4]) # 1, 2, 3, 4
-    parser.add_argument("--kfac_damping", type=float, nargs="+", default=[None, 0.1, 0.01, 1e-7]) # None, 0.01, 1e-7
+    parser.add_argument("--kfac_damping", type=float, nargs="+", default=[0.1, None, 0.01, 1e-7]) # None, 0.01, 1e-7
 
     parser.add_argument("--epochs", type=int, default=500)
     parser.add_argument("--runs", type=int, default=3)
@@ -187,6 +218,8 @@ if __name__ == '__main__':
     parser.add_argument("--step_size", type=int, default=100)
     parser.add_argument("--batch_size", type=int, default=128)
     parser.add_argument("--device", type=str, default="cuda" if cuda.is_available() else "cpu")
+    parser.add_argument("--heads", type=int, default=8, help='Heads for GAT')
+    parser.add_argument('--model', type=str, required=True)
     args = parser.parse_args()
 
     device = torch_device("cuda") if all([args.device == "cuda", cuda.is_available()]) else torch_device("cpu")
@@ -279,10 +312,7 @@ if __name__ == '__main__':
                         best_val_loss, best_val_acc = float("inf"), 0
                         epoch, val_loss, val_acc = 0, float("inf"), 0
 
-                        # todo add num layers to args.
-                        model = GIN(in_channels=features_dim, num_layers=layers,
-                                    hidden_channels=dim_embedding,
-                                    out_channels=n_classes)
+                        model = get_model(args.model, args, dataset, dim_embedding, layers)
 
                         model = model.to(device)
 
@@ -303,7 +333,7 @@ if __name__ == '__main__':
                                                                                                 optimizer, scheduler,
                                                                                                 device,
                                                                                                 preconditioner,
-                                                                                                kfac_damping is not None and epoch > 50
+                                                                                                kfac_damping is not None
                                                                                                 )
 
                             if early_stopper.stop(epoch, val_loss, val_acc):
@@ -342,9 +372,7 @@ if __name__ == '__main__':
         test_accuracies = []
         for _ in range(args.runs):
             # use best_config here!
-            model = GIN(in_channels=features_dim, num_layers=best_config["layers"],
-                                        hidden_channels=best_config["dim_embedding"],
-                                        out_channels=n_classes)
+            model = get_model(args.model, args, dataset, best_config["dim_embedding"], best_config["layers"])
 
             model = model.to(device)
             optimizer = Adam(model.parameters(), lr=best_config["lr"])
