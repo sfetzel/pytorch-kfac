@@ -207,10 +207,15 @@ def get_model(model_str: str, args, dataset, hidden_channels, num_layers) -> Mod
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset_name", type=str, default="ENZYMES") #REDDIT-BINARY
-    parser.add_argument("--dim_embeddings", type=int, nargs="+", default=[16, 32, 64]) # 32, 64
-    parser.add_argument("--lrs", type=float, nargs="+", default=[0.01, 1e-3]) # 0.01, 1e-3
-    parser.add_argument("--layers", type=int, nargs="+", default=[1, 2, 3, 4]) # 1, 2, 3, 4
-    parser.add_argument("--kfac_damping", type=float, nargs="+", default=[0.1, None, 0.01, 1e-7]) # None, 0.01, 1e-7
+    # if dataset has a lot of features, then use a larger embedding size; e.g. 32, 64, 128 for cora
+    # look at paper (https://arxiv.org/pdf/1912.09893.pdf) table 6 for suggestions
+    parser.add_argument("--dim_embeddings", type=int, nargs="+", default=[16, 32, 64]) # 32, 64;
+    parser.add_argument("--lrs", type=float, nargs="+", default=[0.01]) # 0.01, 1e-3; 1e-3 just increases std
+    parser.add_argument("--layers", type=int, nargs="+", default=[1, 3, 5]) # 1, 2, 3, 4; use even or odd numbers
+
+    # if there are 4 choices for damping, more tendency towards preconditioning?
+    # for proof of concept: without reporting accuracies
+    parser.add_argument("--kfac_damping", type=float, nargs="+", default=[0.1, None])# None, 0.01, 1e-7
 
     parser.add_argument("--epochs", type=int, default=500)
     parser.add_argument("--runs", type=int, default=3)
