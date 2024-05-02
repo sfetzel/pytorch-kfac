@@ -8,6 +8,7 @@ from torch import Tensor
 from torch.nn import Parameter
 
 from torch_geometric.nn.conv import MessagePassing
+from torch_geometric.nn import Linear as LinearPyg
 from torch.nn import Linear
 from torch_geometric.nn.inits import glorot, zeros
 from torch_geometric.typing import (
@@ -199,10 +200,12 @@ class GATConv(MessagePassing):
             glorot(self.lin_dst.weight)
         if self.lin_edge is not None:
             glorot(self.lin_edge.weight)
-        #glorot(self.att_src.weight)
-        #glorot(self.att_dst.weight)
-        self.att_src.reset_parameters()
-        self.att_dst.reset_parameters()
+        #glorot(self.att_src)
+        #glorot(self.att_dst)
+        #self.att_src.reset_parameters()
+        glorot(self.att_src.weight)
+        #self.att_dst.reset_parameters()
+        glorot(self.att_dst.weight)
         glorot(self.att_edge)
         zeros(self.bias)
 
@@ -315,6 +318,8 @@ class GATConv(MessagePassing):
         # and target nodes (if present):
         alpha_src = (self.att_src(x_src)).sum(dim=-1)
         alpha_dst = None if x_dst is None else (self.att_dst(x_dst)).sum(-1)
+        #alpha_src = (x_src * self.att_src).sum(dim=-1)
+        #alpha_dst = None if x_dst is None else (x_dst * self.att_dst).sum(-1)
         alpha = (alpha_src, alpha_dst)
 
         if self.add_self_loops:
