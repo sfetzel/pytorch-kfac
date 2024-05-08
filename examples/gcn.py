@@ -1,3 +1,5 @@
+import argparse
+import gc
 import os
 import time
 from os.path import join, dirname
@@ -13,11 +15,11 @@ import torch_geometric.transforms as T
 from torch_sparse import SparseTensor, matmul
 import torch.nn.functional as F
 from tqdm.auto import tqdm
+from plot_utils import plot_training
 
 from torch_kfac import KFAC
 from torch_kfac.layers import FullyConnectedFisherBlock
-
-dev_mode = False
+from hessianfree.optimizer import HessianFree
 
 
 def calculate_sparsity(grad: Tensor):
@@ -34,36 +36,6 @@ def print_sparsity_ratio(grad: Tensor, caption: int):
     sparsity_ratio, sparsity_norm = calculate_sparsity(grad)
     print(f"{caption} sparsity ratio:", sparsity_ratio)
     print(f"{caption} sparsity (norm):", sparsity_norm)
-
-
-def seed_everything():
-    """
-    Sets the seed of torch, torch cuda, torch geometric and native random library.
-
-    :param seed: (Optional) the seed to use.
-    """
-    seed = 42
-
-    import random
-
-    random.seed(seed)
-    os.environ["PYTHONHASHSEED"] = str(seed)
-
-    import numpy as np
-
-    np.random.seed(seed)
-
-    import torch
-
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
-
-    from torch_geometric import seed_everything
-
-    seed_everything(seed)
 
 
 class WeightedMessagePassing(MessagePassing):
@@ -105,13 +77,9 @@ class GCNConv(Module):
         self._cached_edge_index = None
 
     def reset_parameters(self):
-        if dev_mode:
-            self.lin.weight.data.fill_(0.1)
-            self.bias.data.fill_(0.1)
-        else:
-            glorot(self.lin.weight)
-            if self.bias is not None:
-                self.bias.data.fill_(0)
+        glorot(self.lin.weight)
+        if self.bias is not None:
+            self.bias.data.fill_(0)
 
     def forward(self, x, edge_index):
         if self._cached_edge_index is None:
@@ -136,11 +104,7 @@ class CRD(Module):
         self.p = p
 
     def reset_parameters(self):
-        if dev_mode:
-            self.conv.lin.weight.data.fill_(0.1)
-            self.conv.bias.data.fill_(0.1)
-        else:
-            self.conv.reset_parameters()
+        self.conv.reset_parameters()
 
     def forward(self, x, edge_index, mask=None):
         x = F.relu(self.conv(x, edge_index))
@@ -154,11 +118,7 @@ class CLS(Module):
         self.conv = GCNConv(d_in, d_out, cached=True)
 
     def reset_parameters(self):
-        if dev_mode:
-            self.conv.lin.weight.data.fill_(0.1)
-            self.conv.bias.data.fill_(0.1)
-        else:
-            self.conv.reset_parameters()
+        self.conv.reset_parameters()
 
     def forward(self, x, edge_index, mask=None):
         x = self.conv(x, edge_index)
@@ -167,11 +127,11 @@ class CLS(Module):
 
 
 class Net(Module):
-    def __init__(self, dataset, n_layers: int = 1, hidden_dim: int = 16):
+    def __init__(self, dataset, hidden_layers: int = 1, hidden_dim: int = 16):
         super(Net, self).__init__()
         in_features = dataset.num_features
         self.crds = ModuleList()
-        for i in range(n_layers):
+        for i in range(hidden_layers):
             self.crds.append(CRD(in_features, hidden_dim, 0.5))
             in_features = hidden_dim
 
@@ -193,44 +153,43 @@ class Net(Module):
 # Functions train, evaluate and main are based on
 # https://github.com/russellizadi/ssp/blob/master/experiments/train_eval.py.
 
-def train(model, optimizer, data, preconditioner=None, lam=0., epoch=None):
+def model_forward(model):
+    out = model(data)
+    #loss = F.nll_loss(out[data.train_mask], data.y[data.train_mask])
+    loss = F.cross_entropy(out[data.train_mask], data.y[data.train_mask])
+    return loss, out
+
+def train(model, optimizer, data, preconditioner=None, epoch=None):
     model.train()
     optimizer.zero_grad()
-    loss = None
-    with preconditioner.track_forward():
-        out = model(data)
-        label = out.max(1)[1]
-        label[data.train_mask] = data.y[data.train_mask]
-        label.requires_grad = False
 
-        loss = F.nll_loss(out[data.train_mask], label[data.train_mask])
-        loss += lam * F.nll_loss(out[~data.train_mask], label[~data.train_mask])
-    with preconditioner.track_backward():
-        loss.backward(retain_graph=True)
+    if isinstance(optimizer, HessianFree):
+        optimizer.step(lambda: model_forward(model))
+    else:
+        loss = None
+        if preconditioner is not None:
+            with preconditioner.track_forward():
+                out = model(data)
+                label = out.max(1)[1]
+                label[data.train_mask] = data.y[data.train_mask]
+                label.requires_grad = False
 
-    train_nodes = sum(data.train_mask)
-    update = epoch % 50 == 0
-    if update:
-        for block in preconditioner.blocks:
-            if isinstance(block, FullyConnectedFisherBlock):
-                # PSGD doesn't filter the sensitivities or activations.
-                # block._activations = block._activations[data.train_mask]
-                # block._activations = block._activations[data.train_mask]
+                loss = F.nll_loss(out[data.train_mask], label[data.train_mask])
+            with preconditioner.track_backward():
+                loss.backward(retain_graph=True)
 
-                # difference: PSGD multiplies gradient in backward hook with shape[1] instead of shape[0].
-                block._sensitivities = block._sensitivities / block._sensitivities.shape[0] * \
-                                       block._sensitivities.shape[1]
+            update = epoch % 50 == 0
+            if update:
+                preconditioner.update_cov()
+            preconditioner.step()
+        else:
+            out = model(data)
+            label = out.max(1)[1]
+            label[data.train_mask] = data.y[data.train_mask]
 
-        preconditioner.update_cov()
-
-        for block in preconditioner.blocks:
-            if isinstance(block, FullyConnectedFisherBlock):
-                # The PSGD implementation does not divide by count of nodes, but by count of training nodes.
-                block._activations_cov.value = block._activations_cov.value * block._activations.shape[0] / train_nodes
-                block._sensitivities_cov.value = block._sensitivities_cov.value * block._sensitivities.shape[0] / train_nodes
-
-    preconditioner.step(update_inverses=update)
-    optimizer.step()
+            loss = F.nll_loss(out[data.train_mask], label[data.train_mask])
+            loss.backward(retain_graph=True)
+        optimizer.step()
 
 
 def evaluate(model, data):
@@ -253,61 +212,74 @@ def evaluate(model, data):
 
 
 if __name__ == "__main__":
-    device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
-    name = "Cora"
-    dataset = Planetoid(join(dirname(__file__), '..', 'data', name), name, split="public")
-    dataset.transform = T.NormalizeFeatures()
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--dataset', type=str, default='Cora')
+    parser.add_argument('--baseline', choices=['adam', 'hessian', 'ggn'], default='adam')
+    parser.add_argument('--hidden_channels', type=int, default=64)
+    parser.add_argument('--hidden_layers', type=int, default=1)
+    parser.add_argument('--lr', type=float, default=0.01)
+    parser.add_argument('--weight_decay', type=float, default=0.0005)
+    parser.add_argument('--epochs', type=int, default=200)
+    parser.add_argument('--kfac_damping', type=float, default=0.1)
+    parser.add_argument('--dropout', type=float, default=0.5)
+    parser.add_argument('--runs', type=int, default=2)
+    parser.add_argument('--wandb', action='store_true', help='Track experiment')
+    args = parser.parse_args()
 
-    seed_everything()
+    device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+    name = args.dataset
+    dataset = Planetoid(join(dirname(__file__), '..', 'data', name), name)
+    dataset.transform = T.NormalizeFeatures()
+    data = dataset[0].to(device)
+
     epochs = 200
     gamma = None
     runs = 1
 
-    val_losses, accuracies, durations = [], [], []
-    for run in range(1, runs + 1):
-        model = Net(dataset, n_layers=1, hidden_dim=16)
-        lr = 0.01
-        weight_decay = 0.0005
-        data = dataset[0].to(device)
+    def train_model(params):
+        enable_kfac = params["kfac"]
+        model = Net(dataset, hidden_layers=args.hidden_layers, hidden_dim=args.hidden_channels)
+        lr = args.lr
+        weight_decay = args.weight_decay
 
         model.to(device).reset_parameters()
-        optimizer = Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
-
-        # damping corresponds to eps in PSGD.
-        # cov_ema_decay corresponds to 1-alpha in PSGD.
-        # PSGD does not implement momentum.
-        preconditioner = KFAC(model, 0, 0.01, momentum=0.0, damping_adaptation_decay=0,
-                              cov_ema_decay=0.0, enable_pi_correction=False,
-                              damping_adaptation_interval=1, update_cov_manually=True)
-        linear_blocks = sum(1 for block in preconditioner.blocks if isinstance(block, FullyConnectedFisherBlock))
-        print(f"Preconditioning active on {linear_blocks} blocks.")
+        if args.baseline in ["hessian", "ggn"] and not enable_kfac:
+            optimizer = HessianFree(model.parameters(), verbose=False, curvature_opt=args.baseline, cg_max_iter=1000,
+                                    damping=0.1, adapt_damping=False)
+        else:
+            optimizer = Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
+        print(f"Optimizer: {optimizer.__class__} (specified {args.baseline})")
+        preconditioner = None
+        if enable_kfac:
+            # damping corresponds to eps in PSGD.
+            # cov_ema_decay corresponds to 1-alpha in PSGD.
+            # PSGD does not implement momentum.
+            preconditioner = KFAC(model, 0, args.kfac_damping, momentum=0.0, damping_adaptation_decay=0,
+                                  cov_ema_decay=0.0, enable_pi_correction=False,
+                                  damping_adaptation_interval=1, update_cov_manually=True)
+            linear_blocks = sum(1 for block in preconditioner.blocks if isinstance(block, FullyConnectedFisherBlock))
+            print(f"Preconditioning active on {linear_blocks} blocks.")
 
         if torch.cuda.is_available():
             torch.cuda.synchronize()
 
-        t_start = time.perf_counter()
-        best_eval_info = None
         epochs_tqdm = tqdm(range(1, epochs + 1))
+        losses, val_accuracies, test_accuracies, train_accuracies = [], [], [], []
         for epoch in epochs_tqdm:
             train(model, optimizer, data, preconditioner, epoch=epoch-1)
             eval_info = evaluate(model, data)
             epochs_tqdm.set_description(
                 f"Val loss:{eval_info['val loss']:.2f}, Train loss: {eval_info['train loss']:.2f}")
-            if best_eval_info is None or eval_info['val loss'] < best_eval_info['val loss']:
-                best_eval_info = eval_info
+            losses.append(eval_info['train loss'])
+            val_accuracies.append(eval_info['val acc'] * 100)
+            test_accuracies.append(eval_info['test acc'] * 100)
+            train_accuracies.append(eval_info['train acc'] * 100)
 
-        if torch.cuda.is_available():
-            torch.cuda.synchronize()
+        return losses, val_accuracies, test_accuracies, train_accuracies
 
-        t_end = time.perf_counter()
+    _, _, fig = plot_training(args.epochs, args.runs, train_model, [
+        {"kfac": False}, {"kfac": True}
+    ], [args.baseline, "KFAC"])
 
-        val_losses.append(best_eval_info['val loss'])
-        accuracies.append(best_eval_info['test acc'])
-        durations.append(t_end - t_start)
-
-    loss, acc, duration = tensor(val_losses), tensor(accuracies), tensor(durations)
-    print('Val Loss: {:.4f}, Test Accuracy: {:.2f} ± {:.2f}, Duration: {:.3f} \n'.
-          format(loss.mean().item(),
-                 100 * acc.mean().item(),
-                 100 * acc.std().item(),
-                 duration.mean().item()))
+    fig.suptitle(f"GCN Training on {args.dataset}")
+    fig.savefig(f"GCN-loss-{args.dataset}.svg")

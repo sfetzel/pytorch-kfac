@@ -1,3 +1,6 @@
+import gc
+
+import torch
 from matplotlib import pyplot
 from torch import tensor, mean, std
 
@@ -16,6 +19,8 @@ def plot_training(epoch_count, runs, training_fun, parameter_groups: list, capti
         losses_van, val_accuracies_van, test_accuracies_van, train_accuracies_van = [], [], [], []
         for i in range(runs):
             losses, val_accuracies, test_accuracies, train_accuracies = training_fun(parameter_group)
+            gc.collect()
+            torch.cuda.empty_cache()
             losses_van.append(losses)
             val_accuracies_van.append(val_accuracies)
             test_accuracies_van.append(test_accuracies)
