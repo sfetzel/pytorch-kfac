@@ -44,7 +44,7 @@ def initialize_model(enable_preconditioning:bool):
                 args.heads, args.dropout).to(device)
     #lr = args.lr if enable_preconditioning else 0.005
     lr = args.lr
-    optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=0.0005)
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=5e-7)
     preconditioner = KFAC(model, 0, args.kfac_damping if enable_preconditioning else 0,
                           cov_ema_decay=0.85,
                           enable_pi_correction=False, update_cov_manually=False, momentum=0,
@@ -58,14 +58,14 @@ def initialize_model(enable_preconditioning:bool):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('--dataset', type=str, default='Cora')
+    parser.add_argument('--dataset', type=str, default='CiteSeer')
     parser.add_argument('--hidden_channels', type=int, default=8)
     parser.add_argument('--heads', type=int, default=8)
     parser.add_argument('--lr', type=float, default=0.005)
     parser.add_argument('--epochs', type=int, default=200)
-    parser.add_argument('--kfac_damping', type=float, default=None, help='Set to none to disable preconditioning')
+    parser.add_argument('--kfac_damping', type=float, default=0.01)
     parser.add_argument('--dropout', type=float, default=0.5)
-    parser.add_argument('--runs', type=int, default=10)
+    parser.add_argument('--runs', type=int, default=2)
     parser.add_argument('--wandb', action='store_true', help='Track experiment')
     args = parser.parse_args()
 
@@ -152,5 +152,6 @@ if __name__ == "__main__":
     _, _, fig = plot_training(args.epochs, args.runs, train_model_fun,
                               [{"preconditioning": False}, {"preconditioning": True}],
                               ["Vanilla", "KFAC"])
+    fig.suptitle(f"GAT Training on {args.dataset}")
     fig.savefig("GAT-loss.svg")
 

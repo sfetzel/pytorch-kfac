@@ -46,9 +46,9 @@ def plot_training(epoch_count, runs, training_fun, parameter_groups: list, capti
         ax2.fill_between(epochs, (val_accuracies_van_mean - val_accuracies_van_sd),
                          (val_accuracies_van_mean + val_accuracies_van_sd), color='orange', alpha=0.1)
 
-        """ax2.plot(epochs, test_accuracies_van_mean, linestyle, label=f"Test ({caption})", color='green')
+        ax2.plot(epochs, test_accuracies_van_mean, linestyle, label=f"Test ({caption})", color='green')
         ax2.fill_between(epochs, (test_accuracies_van_mean - test_accuracies_van_sd),
-                         (test_accuracies_van_mean + test_accuracies_van_sd), color='green', alpha=0.1)"""
+                         (test_accuracies_van_mean + test_accuracies_van_sd), color='green', alpha=0.1)
         ax2.plot(epochs, train_accuracies_van_mean, linestyle, label=f"Training ({caption})", color='red')
         ax2.fill_between(epochs, (train_accuracies_van_mean - train_accuracies_van_sd),
                          (train_accuracies_van_mean + train_accuracies_van_sd), color='red', alpha=0.1)

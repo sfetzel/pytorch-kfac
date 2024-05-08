@@ -30,18 +30,18 @@ class FullyConnectedFisherBlock(ExtensionFisherBlock):
             output_data: the output data of the layer.
         """
         x = input_data[0].detach().clone().reshape(-1, self._in_features - self.has_bias).requires_grad_(False)
-        #if self._activations is None:
-        self._activations = x
-        #else:
-        #    self._activations = torch.cat([self._activations, x])
+        if self._activations is None:
+            self._activations = x
+        else:
+            self._activations = torch.cat([self._activations, x])
 
     @torch.no_grad()
     def backward_hook(self, module: Linear, grad_inp: torch.Tensor, grad_out: torch.Tensor) -> None:
         x = grad_out[0].clone().detach().reshape(-1, self._out_features).requires_grad_(False) * grad_out[0].shape[0]
-        #if self._sensitivities is None:
-        self._sensitivities = x
-        #else:
-        #    self._sensitivities = torch.cat([self._sensitivities, x])
+        if self._sensitivities is None:
+            self._sensitivities = x
+        else:
+            self._sensitivities = torch.cat([self._sensitivities, x])
 
     def setup(self, center: bool = False, **kwargs):
         super().setup(**kwargs)
@@ -62,6 +62,8 @@ class FullyConnectedFisherBlock(ExtensionFisherBlock):
         sensitivity_cov = compute_cov(sen)
         self._activations_cov.add_to_average(activation_cov, cov_ema_decay)
         self._sensitivities_cov.add_to_average(sensitivity_cov, cov_ema_decay)
+        self._activations = None
+        self._sensitivities = None
 
     def grads_to_mat(self, grads: Iterable[torch.Tensor]) -> torch.Tensor:
         if self.has_bias:
