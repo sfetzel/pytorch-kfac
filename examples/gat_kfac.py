@@ -11,11 +11,11 @@ from torch import tensor, mean, std
 from torch_geometric.datasets import Planetoid, OGB_MAG
 from torch_geometric.logging import init_wandb, log
 from torch_geometric.nn import BatchNorm
+from torch_geometric.utils import dropout_edge
 
 from examples.plot_utils import plot_training
 from gat_conv import GATConv
 from tqdm.auto import tqdm
-from gcn import seed_everything
 from torch_kfac import KFAC
 from torch_kfac.layers import FullyConnectedFisherBlock
 
@@ -30,13 +30,14 @@ class GAT(torch.nn.Module):
         self.dropout = dropout
 
     def forward(self, x, edge_index):
+        train_edges, _ = dropout_edge(edge_index, p=self.dropout, training=self.training)
         x = F.dropout(x, p=self.dropout, training=self.training)
-        x = self.conv1(x, edge_index)
+        x = self.conv1(x, train_edges)
         # removing batch normalization -> without preconditioning no learning.
         x = self.batch_norm(x)
         x = F.elu(x)
         x = F.dropout(x, p=self.dropout, training=self.training)
-        x = self.conv2(x, edge_index)
+        x = self.conv2(x, train_edges)
         return x
 
 def initialize_model(enable_preconditioning:bool):
@@ -46,8 +47,8 @@ def initialize_model(enable_preconditioning:bool):
     lr = args.lr
     optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=5e-7)
     preconditioner = KFAC(model, 0, args.kfac_damping if enable_preconditioning else 0,
-                          cov_ema_decay=0.85,
-                          enable_pi_correction=False, update_cov_manually=False, momentum=0,
+                          cov_ema_decay=0.0,
+                          enable_pi_correction=True, update_cov_manually=False, momentum=0,
                           damping_adaptation_decay=0, damping_adaptation_interval=1)
     if enable_preconditioning:
         linear_blocks = sum(1 for block in preconditioner.blocks if isinstance(block, FullyConnectedFisherBlock))
@@ -63,8 +64,8 @@ if __name__ == "__main__":
     parser.add_argument('--heads', type=int, default=8)
     parser.add_argument('--lr', type=float, default=0.005)
     parser.add_argument('--epochs', type=int, default=200)
-    parser.add_argument('--kfac_damping', type=float, default=0.01)
-    parser.add_argument('--dropout', type=float, default=0.5)
+    parser.add_argument('--kfac_damping', type=float, default=0.1)
+    parser.add_argument('--dropout', type=float, default=0.6)
     parser.add_argument('--runs', type=int, default=2)
     parser.add_argument('--wandb', action='store_true', help='Track experiment')
     args = parser.parse_args()
@@ -82,7 +83,7 @@ if __name__ == "__main__":
 
 def train(model, optimizer, preconditioner, enable_preconditioning):
     model.train()
-    optimizer.zero_grad()
+    model.zero_grad()
     if enable_preconditioning:
         with preconditioner.track_forward():
             out = model(data.x, data.edge_index)

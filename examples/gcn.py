@@ -6,12 +6,13 @@ from os.path import join, dirname
 import torch
 from torch import Tensor, no_grad, tensor
 from torch.nn import Module, Linear, ModuleList
-from torch.optim import Adam
+from torch.optim import Adam, SGD, AdamW
 from torch_geometric.datasets import Planetoid
 from torch_geometric.nn import MessagePassing
 from torch_geometric.nn.conv.gcn_conv import gcn_norm
 from torch_geometric.nn.inits import glorot
 import torch_geometric.transforms as T
+from torch_landscape.utils import seed_everything
 from torch_sparse import SparseTensor, matmul
 import torch.nn.functional as F
 from tqdm.auto import tqdm
@@ -164,7 +165,7 @@ def train(model, optimizer, data, preconditioner=None, epoch=None):
     optimizer.zero_grad()
 
     if isinstance(optimizer, HessianFree):
-        optimizer.step(lambda: model_forward(model))
+        optimizer.step(lambda: model_forward(model), test_deterministic=True)
     else:
         loss = None
         if preconditioner is not None:
@@ -221,6 +222,7 @@ if __name__ == "__main__":
     parser.add_argument('--weight_decay', type=float, default=0.0005)
     parser.add_argument('--epochs', type=int, default=200)
     parser.add_argument('--kfac_damping', type=float, default=0.1)
+    parser.add_argument('--hessianfree_damping', type=float, default=0.1)
     parser.add_argument('--dropout', type=float, default=0.5)
     parser.add_argument('--runs', type=int, default=2)
     parser.add_argument('--wandb', action='store_true', help='Track experiment')
@@ -232,7 +234,7 @@ if __name__ == "__main__":
     dataset.transform = T.NormalizeFeatures()
     data = dataset[0].to(device)
 
-    epochs = 200
+    epochs = args.epochs
     gamma = None
     runs = 1
 
@@ -245,9 +247,11 @@ if __name__ == "__main__":
         model.to(device).reset_parameters()
         if args.baseline in ["hessian", "ggn"] and not enable_kfac:
             optimizer = HessianFree(model.parameters(), verbose=False, curvature_opt=args.baseline, cg_max_iter=1000,
-                                    damping=0.1, adapt_damping=False)
+                                    damping=args.hessianfree_damping, adapt_damping=False)
         else:
-            optimizer = Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
+            optimizer = AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
+            #optimizer = SGD(model.parameters(), lr=lr, weight_decay=weight_decay)
+
         print(f"Optimizer: {optimizer.__class__} (specified {args.baseline})")
         preconditioner = None
         if enable_kfac:
@@ -269,7 +273,7 @@ if __name__ == "__main__":
             train(model, optimizer, data, preconditioner, epoch=epoch-1)
             eval_info = evaluate(model, data)
             epochs_tqdm.set_description(
-                f"Val loss:{eval_info['val loss']:.2f}, Train loss: {eval_info['train loss']:.2f}")
+                f"Val loss:{eval_info['val loss']:.2f}, Train loss: {eval_info['train loss']:.2f}, Test acc: {eval_info['test acc']:.2f}")
             losses.append(eval_info['train loss'])
             val_accuracies.append(eval_info['val acc'] * 100)
             test_accuracies.append(eval_info['test acc'] * 100)
