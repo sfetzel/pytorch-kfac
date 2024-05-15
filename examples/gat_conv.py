@@ -8,7 +8,8 @@ from torch import Tensor
 from torch.nn import Parameter
 
 from torch_geometric.nn.conv import MessagePassing
-from torch.nn import Linear
+from torch_geometric.nn import Linear as LinearPyg
+from torch.nn import Linear as LinearTorch
 from torch_geometric.nn.inits import glorot, zeros
 from torch_geometric.typing import (
     Adj,
@@ -26,6 +27,8 @@ from torch_geometric.utils import (
     softmax,
 )
 from torch_geometric.utils.sparse import set_sparse_value
+
+from torch_kfac.layers.bias_layer import Bias
 
 if typing.TYPE_CHECKING:
     from typing import overload
@@ -158,30 +161,30 @@ class GATConv(MessagePassing):
         # transformations 'lin_src' and 'lin_dst' to source and target nodes:
         self.lin = self.lin_src = self.lin_dst = None
         if isinstance(in_channels, int):
-            self.lin = Linear(in_channels, heads * out_channels, bias=False)
+            self.lin = LinearTorch(in_channels, heads * out_channels, bias=False)
         else:
-            self.lin_src = Linear(in_channels[0], heads * out_channels, False)
-            self.lin_dst = Linear(in_channels[1], heads * out_channels, False)
+            self.lin_src = LinearTorch(in_channels[0], heads * out_channels, False)
+            self.lin_dst = LinearTorch(in_channels[1], heads * out_channels, False)
 
         # The learnable parameters to compute attention coefficients:
         # att_src had size [1, heads, out_channels].
         # will be multiplied from left with x_src of shape [N, H, C]
         #self.att_src = Parameter(torch.empty(1, heads, out_channels))
-        self.att_src = Linear(out_channels, heads, bias=False)
-        self.att_dst = Linear(out_channels, heads, bias=False)
+        self.att_src = LinearTorch(out_channels, heads, bias=False)
+        self.att_dst = LinearTorch(out_channels, heads, bias=False)
         #self.att_dst = Parameter(torch.empty(1, heads, out_channels))
 
         if edge_dim is not None:
-            self.lin_edge = Linear(edge_dim, heads * out_channels, bias=False)
+            self.lin_edge = LinearTorch(edge_dim, heads * out_channels, bias=False)
             self.att_edge = Parameter(torch.empty(1, heads, out_channels))
         else:
             self.lin_edge = None
             self.register_parameter('att_edge', None)
 
         if bias and concat:
-            self.bias = Parameter(torch.empty(heads * out_channels))
+            self.bias = Bias(heads * out_channels)
         elif bias and not concat:
-            self.bias = Parameter(torch.empty(out_channels))
+            self.bias = Bias(out_channels)
         else:
             self.register_parameter('bias', None)
 
@@ -199,12 +202,15 @@ class GATConv(MessagePassing):
             glorot(self.lin_dst.weight)
         if self.lin_edge is not None:
             glorot(self.lin_edge.weight)
-        #glorot(self.att_src.weight)
-        #glorot(self.att_dst.weight)
-        self.att_src.reset_parameters()
-        self.att_dst.reset_parameters()
+        #glorot(self.att_src)
+        #glorot(self.att_dst)
+        #self.att_src.reset_parameters()
+        glorot(self.att_src.weight)
+        #self.att_dst.reset_parameters()
+        glorot(self.att_dst.weight)
         glorot(self.att_edge)
-        zeros(self.bias)
+        #zeros(self.bias)
+        self.bias.reset_parameters()
 
 
     @overload
@@ -313,8 +319,10 @@ class GATConv(MessagePassing):
 
         # Next, we compute node-level attention coefficients, both for source
         # and target nodes (if present):
-        alpha_src = (self.att_src(x_src)).sum(dim=-1)
+        alpha_src = self.att_src(x_src).sum(dim=-1)
         alpha_dst = None if x_dst is None else (self.att_dst(x_dst)).sum(-1)
+        #alpha_src = (x_src * self.att_src).sum(dim=-1)
+        #alpha_dst = None if x_dst is None else (x_dst * self.att_dst).sum(-1)
         alpha = (alpha_src, alpha_dst)
 
         if self.add_self_loops:
@@ -352,7 +360,7 @@ class GATConv(MessagePassing):
             out = out.mean(dim=1)
 
         if self.bias is not None:
-            out = out + self.bias
+            out = self.bias(out)
 
         if isinstance(return_attention_weights, bool):
             if isinstance(edge_index, Tensor):

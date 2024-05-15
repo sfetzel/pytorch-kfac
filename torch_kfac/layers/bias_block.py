@@ -1,24 +1,29 @@
 from typing import Iterable
 import torch
+from torch import eye, tensor
 from torch.nn import Linear
 
+from .bias_layer import Bias
 from .fisher_block import ExtensionFisherBlock, FisherBlock
 from ..utils import center, compute_cov, append_homog
 
 
-class FullyConnectedFisherBlock(ExtensionFisherBlock):
-    def __init__(self, module: Linear, **kwargs) -> None:
+class BiasFisherBlock(ExtensionFisherBlock):
+    def __init__(self, module: Bias, **kwargs) -> None:
         super().__init__(
             module=module,
-            in_features=module.in_features + int(module.bias is not None),
+            in_features=1,
             out_features=module.out_features,
-            dtype=module.weight.dtype,
-            device=module.weight.device,
+            dtype=module.bias.dtype,
+            device=module.bias.device,
             **kwargs)
 
         self._activations = None
         self._sensitivities = None
         self._center = False
+        #self._activations_cov.value = eye(module.out_features)
+        #self._activations_cov.add_to_average(1.0, 0.0)
+        #self._activations = tensor([[1.0]])
 
     @torch.no_grad()
     def forward_hook(self, module: Linear, input_data: torch.Tensor, output_data: torch.Tensor) -> None:
@@ -54,7 +59,7 @@ class FullyConnectedFisherBlock(ExtensionFisherBlock):
         if self._center:
             act = center(act)
             sen = center(sen)
-        
+
         if self.has_bias:
             act = append_homog(act)
 
@@ -66,26 +71,16 @@ class FullyConnectedFisherBlock(ExtensionFisherBlock):
         self._sensitivities = None
 
     def grads_to_mat(self, grads: Iterable[torch.Tensor]) -> torch.Tensor:
-        if self.has_bias:
-            weights, bias = grads
-            mat_grads = torch.cat([weights, bias[:, None]], -1)
-        else:
-            mat_grads = grads[0]
+        mat_grads = grads[0]
         return mat_grads
 
     def mat_to_grads(self, mat_grads: torch.Tensor) -> torch.Tensor:
-        if self.has_bias:
-            return mat_grads[:, :-1], mat_grads[:, -1]
-        else:
-            return mat_grads,
+        return mat_grads,
 
     @property
     def has_bias(self) -> bool:
-        return self.module.bias is not None
+        return True
 
     @property
     def vars(self) -> Iterable[torch.Tensor]:
-        if self.has_bias:
-            return [self.module.weight, self.module.bias]
-        else:
-            return [self.module.weight]
+        return [self.module.bias]
