@@ -2,7 +2,7 @@ import gc
 
 import torch
 from matplotlib import pyplot
-from torch import tensor, mean, std
+from torch import tensor, mean, std, argmax
 
 
 def plot_training(epoch_count, runs, training_fun, parameter_groups: list, captions: list):
@@ -14,9 +14,11 @@ def plot_training(epoch_count, runs, training_fun, parameter_groups: list, capti
     fig, ax1 = pyplot.subplots()
     ax2 = ax1.twinx()
     linestyles = ["-", "--"]
-
+    group_results = {}
     for index, (parameter_group, caption) in enumerate(zip(parameter_groups, captions)):
         losses_van, val_accuracies_van, test_accuracies_van, train_accuracies_van = [], [], [], []
+
+        best_loss, best_val_acc, best_test_acc, best_train_acc = [], [], [], []
         for i in range(runs):
             losses, val_accuracies, test_accuracies, train_accuracies = training_fun(parameter_group)
             gc.collect()
@@ -25,6 +27,26 @@ def plot_training(epoch_count, runs, training_fun, parameter_groups: list, capti
             val_accuracies_van.append(val_accuracies)
             test_accuracies_van.append(test_accuracies)
             train_accuracies_van.append(train_accuracies)
+
+            best_epoch = argmax(tensor(val_accuracies))
+            best_loss.append(losses[best_epoch])
+            best_val_acc.append(val_accuracies[best_epoch])
+            best_test_acc.append(test_accuracies[best_epoch])
+            best_train_acc.append(train_accuracies[best_epoch])
+        best_loss = tensor(best_loss)
+        best_val_acc = tensor(best_val_acc)
+        best_test_acc = tensor(best_test_acc)
+        best_train_acc = tensor(best_train_acc)
+        group_results[caption] = {
+            "best_loss_mean": mean(best_loss).item(),
+            "best_loss_std": std(best_loss).item(),
+            "best_val_acc_mean": mean(best_val_acc).item(),
+            "best_val_acc_std": std(best_val_acc).item(),
+            "best_test_acc_mean": mean(best_test_acc).item(),
+            "best_test_acc_std": std(best_test_acc).item(),
+            "best_train_acc_mean": mean(best_train_acc).item(),
+            "best_train_acc_std": std(best_train_acc).item(),
+        }
 
         # rows are training runs, columns are epochs.
         losses_van = tensor(losses_van)
@@ -62,4 +84,4 @@ def plot_training(epoch_count, runs, training_fun, parameter_groups: list, capti
 
     ax2.grid()
     fig.legend(loc='upper left')
-    return ax1, ax2, fig
+    return ax1, ax2, fig, group_results
