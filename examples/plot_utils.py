@@ -4,15 +4,35 @@ import torch
 from matplotlib import pyplot
 from torch import tensor, mean, std, argmax
 
+from os.path import exists, splitext
+
+def find_filename(filename, filename_ext=None):
+
+    if filename_ext is None:
+        filename, filename_ext = splitext(filename)
+    i = 1
+    while exists(f"{filename}-{i}.{filename_ext}"):
+        i += 1
+
+    return f"{filename}-{i}"
+
+def set_fontsize(ax, font_size: float):
+    for item in ([ax.title, ax.xaxis.label, ax.yaxis.label] +
+                 ax.get_xticklabels() + ax.get_yticklabels()):
+        item.set_fontsize(font_size)
+
 
 def plot_training(epoch_count, runs, training_fun, parameter_groups: list, captions: list):
     times = []
     best_val_acc = final_test_acc = 0
     best_loss = 0
     epochs = range(1, epoch_count + 1)
-
-    fig, ax1 = pyplot.subplots()
+    fontsize = 25
+    fig, ax1 = pyplot.subplots(figsize=(15, 10))
     ax2 = ax1.twinx()
+    set_fontsize(ax1, fontsize)
+    set_fontsize(ax2, fontsize)
+
     linestyles = ["-", "--"]
     group_results = {}
     for index, (parameter_group, caption) in enumerate(zip(parameter_groups, captions)):
@@ -81,7 +101,10 @@ def plot_training(epoch_count, runs, training_fun, parameter_groups: list, capti
                          (train_accuracies_van_mean + train_accuracies_van_sd), color='red', alpha=0.1)
 
     ax2.set_ylabel("%")
-
+    ax2.set_ylim(0, 105)
     ax2.grid()
-    fig.legend(loc='upper left')
+    ax1.grid()
+    ax1.set_ylim(0.0, 2.0)
+    fig.legend(fontsize=fontsize, loc='lower right')
+
     return ax1, ax2, fig, group_results

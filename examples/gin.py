@@ -11,6 +11,7 @@ from torch_geometric.datasets import TUDataset
 from torch_geometric.loader import DataLoader
 from torch_geometric.logging import init_wandb, log
 from torch_geometric.nn import MLP, GINConv, global_add_pool, BatchNorm
+from torch_geometric.transforms import RandomLinkSplit
 
 from torch_kfac import KFAC
 from torch_kfac.layers import FullyConnectedFisherBlock
@@ -19,16 +20,18 @@ from torch_kfac.layers import FullyConnectedFisherBlock
 
 
 class GIN(torch.nn.Module):
-    def __init__(self, in_channels, hidden_channels, out_channels, num_layers):
+    def __init__(self, in_channels, hidden_channels, out_channels, num_layers, dropout):
         super().__init__()
 
         self.convs = torch.nn.ModuleList()
         for _ in range(num_layers):
             # original:
             # mlp = MLP([in_channels, hidden_channels, hidden_channels])
-            mlp = Sequential(Linear(in_channels, hidden_channels),
+            mlp = Sequential(Dropout(p=dropout),
+                             Linear(in_channels, hidden_channels),
                              BatchNorm(hidden_channels),
                              ReLU(),
+                             Dropout(p=dropout),
                              Linear(hidden_channels, hidden_channels))
             self.convs.append(GINConv(nn=mlp, train_eps=True))
             in_channels = hidden_channels
@@ -36,11 +39,12 @@ class GIN(torch.nn.Module):
         # original:
         #self.mlp = MLP([hidden_channels, hidden_channels, out_channels],
         #               norm=None, dropout=0.5)
-        self.mlp = Sequential(Linear(hidden_channels, hidden_channels),
+        self.mlp = Sequential(Dropout(dropout),
+                              Linear(hidden_channels, hidden_channels),
                               ReLU(),
-                              Dropout(0.5),
+                              Dropout(dropout),
                               Linear(hidden_channels, out_channels),
-                              Dropout(0.5))
+                              Dropout(dropout))
 
     def forward(self, x, edge_index, batch):
         for conv in self.convs:
@@ -49,19 +53,25 @@ class GIN(torch.nn.Module):
         return self.mlp(x)
 
 
-def train(epoch):
+def train(epoch, enable_kfac):
     model.train()
 
     total_loss = 0
     for data in train_loader:
         optimizer.zero_grad()
-        with preconditioner.track_forward():
+        if enable_kfac:
+            with preconditioner.track_forward():
+                data = data.to(device)
+                out = model(data.x, data.edge_index, data.batch)
+                loss = F.cross_entropy(out, data.y)
+            with preconditioner.track_backward():
+                loss.backward()
+        else:
             data = data.to(device)
             out = model(data.x, data.edge_index, data.batch)
             loss = F.cross_entropy(out, data.y)
-        with preconditioner.track_backward():
             loss.backward()
-        if args.kfac:
+        if enable_kfac:
             if epoch % 10 == 0:
                 preconditioner.update_cov()
             preconditioner.step()
@@ -90,10 +100,13 @@ if __name__ == "__main__":
     parser.add_argument('--num_layers', type=int, default=5)
     parser.add_argument('--lr', type=float, default=0.01)
     parser.add_argument('--epochs', type=int, default=100)
-    parser.add_argument('--wandb', action='store_true', help='Track experiment')
-    parser.add_argument('--kfac', action='store_true', default=False)
+    parser.add_argument('--kfac_damping', type=float, default=1e-7)
+    parser.add_argument('--dropout', type=float, default=0.0)
+    parser.add_argument('--weight_decay', type=float, default=0.0)
     args = parser.parse_args()
-
+    print(args)
+    enable_kfac = args.kfac_damping is not None and args.kfac_damping != 0.0
+    print(f"Enable kfac: {enable_kfac}")
     if torch.cuda.is_available():
         device = torch.device('cuda')
     elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
@@ -102,20 +115,11 @@ if __name__ == "__main__":
     else:
         device = torch.device('cpu')
 
-    init_wandb(
-        name=f'GIN-{args.dataset}',
-        batch_size=args.batch_size,
-        lr=args.lr,
-        epochs=args.epochs,
-        hidden_channels=args.hidden_channels,
-        num_layers=args.num_layers,
-        device=device,
-    )
-
     path = osp.join(osp.dirname(osp.realpath(__file__)), '..', 'data', 'TU')
     dataset = TUDataset(path, name=args.dataset).shuffle()
 
-    train_loader = DataLoader(dataset[:0.9], args.batch_size, shuffle=True)
+    train_loader = DataLoader(dataset[:0.8], args.batch_size, shuffle=True)
+    val_loader = DataLoader(dataset[0.8:0.9], args.batch_size)
     test_loader = DataLoader(dataset[0.9:], args.batch_size)
 
     test_accuracies = []
@@ -126,25 +130,31 @@ if __name__ == "__main__":
             hidden_channels=args.hidden_channels,
             out_channels=dataset.num_classes,
             num_layers=args.num_layers,
+            dropout=args.dropout
         ).to(device)
-        optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
-        preconditioner = KFAC(model, 0, 1e-7, cov_ema_decay=0.85, momentum=0, update_cov_manually=True)
+        optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+        preconditioner = KFAC(model, 0, args.kfac_damping, cov_ema_decay=0.85, momentum=0, update_cov_manually=True)
 
-        if args.kfac:
+        if enable_kfac:
             linear_blocks = sum(1 for block in preconditioner.blocks if isinstance(block, FullyConnectedFisherBlock))
             print(f"Preconditioning active on {linear_blocks} blocks.")
 
         times = []
         best_test_acc = 0.
+        best_val_acc = 0.
         for epoch in range(args.epochs):
             start = time.time()
-            loss = train(epoch)
+            loss = train(epoch, enable_kfac)
             train_acc = test(train_loader)
+            val_acc = test(val_loader)
             test_acc = test(test_loader)
-            log(Epoch=epoch, Loss=loss, Train=train_acc, Test=test_acc)
+            log(Epoch=epoch, Loss=loss, Val=val_acc, Train=train_acc, Test=test_acc)
             times.append(time.time() - start)
-            best_test_acc = max(best_test_acc, test_acc)
+
+            if val_acc > best_val_acc:
+                best_test_acc = test_acc
+                best_val_acc = val_acc
         test_accuracies.append(best_test_acc)
         print(f'Median time per epoch: {torch.tensor(times).median():.4f}s, Best test accuracy: {best_test_acc*100:.2f}%')
 
-    print(f'Test accuracy: {numpy.mean(test_accuracies)*100:.2f}%±{numpy.std(test_accuracies)*100:.2f}%')
+    print(f'Overall Test accuracy: {numpy.mean(test_accuracies)*100:.2f}%±{numpy.std(test_accuracies)*100:.2f}%')
