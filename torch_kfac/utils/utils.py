@@ -26,7 +26,7 @@ def compute_cov(tensor: torch.Tensor, tensor_right: torch.Tensor = None, normali
     mean is zero, so that the true second moment equals the true covariance.
 
     Args:
-    tensor: A 2D Tensor.
+    tensor: A 2D Tensor, where the rows correspond to samples. The columns correspond to features.
     tensor_right: An optional 2D Tensor. If provided, this function computes
         the matrix product tensor^T * tensor_right instead of tensor^T * tensor.
     normalizer: optional scalar for the estimator (by default, the normalizer is

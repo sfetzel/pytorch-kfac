@@ -12,8 +12,9 @@ from torch_geometric.logging import init_wandb, log
 from torch_geometric.nn import BatchNorm
 
 from gat_conv import GATConv
+#from torch_geometric.nn.conv import GATConv
 from tqdm.auto import tqdm
-from gcn import seed_everything
+from planetoid import seed_everything
 from torch_kfac import KFAC
 from torch_kfac.layers import FullyConnectedFisherBlock
 
@@ -30,8 +31,7 @@ class GAT(torch.nn.Module):
     def forward(self, x, edge_index):
         x = F.dropout(x, p=self.dropout, training=self.training)
         x = self.conv1(x, edge_index)
-        # removing batch normalization -> without preconditioning no learning.
-        x = self.batch_norm(x)
+        #x = self.batch_norm(x)
         x = F.elu(x)
         x = F.dropout(x, p=self.dropout, training=self.training)
         x = self.conv2(x, edge_index)
@@ -40,7 +40,7 @@ class GAT(torch.nn.Module):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('--dataset', type=str, default='CiteSeer')
+    parser.add_argument('--dataset', type=str, default='PubMed')
     parser.add_argument('--hidden_channels', type=int, default=8)
     parser.add_argument('--heads', type=int, default=8)
     parser.add_argument('--lr', type=float, default=0.005)
@@ -65,7 +65,7 @@ if __name__ == "__main__":
     #seed_everything()
     model = GAT(dataset.num_features, args.hidden_channels, dataset.num_classes,
                 args.heads, args.dropout).to(device)
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=1e-1)
+    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=5e-4)
     preconditioner = KFAC(model, 0, args.kfac_damping if enable_preconditioning else 0, cov_ema_decay=0.0,
                           enable_pi_correction=False, update_cov_manually=False, momentum=0, damping_adaptation_decay=0,
                           damping_adaptation_interval=1)

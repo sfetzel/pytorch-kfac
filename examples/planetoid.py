@@ -264,7 +264,9 @@ if __name__ == "__main__":
         "dropout": args.dropout,
         "kfac_damping": args.kfac_damping,
         "hessianfree_damping": args.hessianfree_damping,
-        "heads": args.heads
+        "heads": args.heads,
+        "cov_ema_decay": args.cov_ema_decay,
+        "cov_update_freq": args.cov_update_freq
     }
 
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')

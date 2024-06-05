@@ -15,7 +15,7 @@ from torch_geometric.transforms import RandomLinkSplit
 
 from torch_kfac import KFAC
 from torch_kfac.layers import FullyConnectedFisherBlock
-
+from tqdm.auto import tqdm
 
 
 
@@ -133,7 +133,8 @@ if __name__ == "__main__":
             dropout=args.dropout
         ).to(device)
         optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
-        preconditioner = KFAC(model, 0, args.kfac_damping, cov_ema_decay=0.85, momentum=0, update_cov_manually=True)
+        preconditioner = KFAC(model, 0, args.kfac_damping, enable_pi_correction=False,
+                              cov_ema_decay=0.85, momentum=0, update_cov_manually=True)
 
         if enable_kfac:
             linear_blocks = sum(1 for block in preconditioner.blocks if isinstance(block, FullyConnectedFisherBlock))
@@ -142,13 +143,15 @@ if __name__ == "__main__":
         times = []
         best_test_acc = 0.
         best_val_acc = 0.
-        for epoch in range(args.epochs):
+        epochs_tqdm = tqdm(range(args.epochs))
+        for epoch in epochs_tqdm:
             start = time.time()
             loss = train(epoch, enable_kfac)
             train_acc = test(train_loader)
             val_acc = test(val_loader)
             test_acc = test(test_loader)
-            log(Epoch=epoch, Loss=loss, Val=val_acc, Train=train_acc, Test=test_acc)
+            epochs_tqdm.set_description(f"Loss: {loss:.3f}, Val acc: {val_acc*100:.2f}%, Test acc: {test_acc*100:.2f}%")
+
             times.append(time.time() - start)
 
             if val_acc > best_val_acc:

@@ -176,7 +176,8 @@ class GATConv(MessagePassing):
 
         if edge_dim is not None:
             self.lin_edge = LinearTorch(edge_dim, heads * out_channels, bias=False)
-            self.att_edge = Parameter(torch.empty(1, heads, out_channels))
+            #self.att_edge = Parameter(torch.empty(1, heads, out_channels))
+            self.att_edge = LinearTorch(out_channels, heads, bias=False)
         else:
             self.lin_edge = None
             self.register_parameter('att_edge', None)
@@ -208,7 +209,8 @@ class GATConv(MessagePassing):
         glorot(self.att_src.weight)
         #self.att_dst.reset_parameters()
         glorot(self.att_dst.weight)
-        glorot(self.att_edge)
+        if self.att_edge is not None:
+            glorot(self.att_edge.weight)
         #zeros(self.bias)
         self.bias.reset_parameters()
 
