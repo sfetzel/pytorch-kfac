@@ -5,9 +5,9 @@ name: pytorch-kfac
 
 on:
   push:
-    branches: [ "master", "feature/pipeline" ]
+    branches: [ "master", "feature/pipeline", "gnns" ]
   pull_request:
-    branches: [ "master", "feature/pipeline" ]
+    branches: [ "master", "feature/pipeline", "gnns" ]
 
 permissions:
   contents: read
