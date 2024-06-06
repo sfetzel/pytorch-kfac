@@ -1,2 +1,3 @@
 torch
+torch_geometric
 pytest
