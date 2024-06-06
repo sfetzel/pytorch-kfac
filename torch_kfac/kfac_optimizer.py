@@ -81,7 +81,7 @@ class KFAC(object):
 
         device = next(model.parameters()).device
         dtype = next(model.parameters()).dtype
-        self._damping = damping if isinstance(damping, Tensor) else tensor(damping)
+        self._damping = damping if isinstance(damping, Tensor) else tensor(damping, dtype=dtype, device=device)
         self._adapt_damping = adapt_damping
         self._damping_adaptation_decay = damping_adaptation_decay
         self._damping_adaptation_interval = damping_adaptation_interval

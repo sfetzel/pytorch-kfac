@@ -1,4 +1,5 @@
 import gc
+import time
 
 import torch
 from matplotlib import pyplot
@@ -39,11 +40,15 @@ def plot_training(epoch_count, runs, training_fun, parameter_groups: list, capti
         losses_van, val_accuracies_van, test_accuracies_van, train_accuracies_van = [], [], [], []
 
         best_loss, best_val_acc, best_test_acc, best_train_acc = [], [], [], []
+        times = []
         for i in range(runs):
+            start_time = time.perf_counter()
             losses, val_accuracies, test_accuracies, train_accuracies = training_fun(parameter_group)
+            stop_time = time.perf_counter()
             gc.collect()
             torch.cuda.empty_cache()
             losses_van.append(losses)
+            times.append(stop_time - start_time)
             val_accuracies_van.append(val_accuracies)
             test_accuracies_van.append(test_accuracies)
             train_accuracies_van.append(train_accuracies)
@@ -57,6 +62,7 @@ def plot_training(epoch_count, runs, training_fun, parameter_groups: list, capti
         best_val_acc = tensor(best_val_acc)
         best_test_acc = tensor(best_test_acc)
         best_train_acc = tensor(best_train_acc)
+        times_tensor = tensor(times)
         group_results[caption] = {
             "best_loss_mean": mean(best_loss).item(),
             "best_loss_std": std(best_loss).item(),
@@ -66,6 +72,8 @@ def plot_training(epoch_count, runs, training_fun, parameter_groups: list, capti
             "best_test_acc_std": std(best_test_acc).item(),
             "best_train_acc_mean": mean(best_train_acc).item(),
             "best_train_acc_std": std(best_train_acc).item(),
+            "train_time_mean": mean(times_tensor).item(),
+            "train_time_std": std(times_tensor).item(),
         }
 
         # rows are training runs, columns are epochs.

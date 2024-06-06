@@ -4,19 +4,17 @@ import os
 import time
 from os.path import join, dirname
 import torch
-from torch import Tensor, no_grad, tensor
+from torch import Tensor, no_grad, tensor, nn
 from torch.nn import Module, Linear, ModuleList
 from torch.optim import Adam, SGD, AdamW
 from torch_geometric.datasets import Planetoid
 from torch_geometric.nn import BatchNorm
 
-from torch_geometric.nn.conv.gcn_conv import gcn_norm
-from torch_geometric.nn.inits import glorot
 import torch_geometric.transforms as T
-from torch_landscape.utils import seed_everything
-from torch_sparse import SparseTensor, matmul
 import torch.nn.functional as F
 from tqdm.auto import tqdm
+
+from examples.linear_block import LinearBlock
 from plot_utils import plot_training, find_filename
 from gat_conv import GATConv
 import json
@@ -25,6 +23,8 @@ from gcn_conv import GCNConv
 from torch_kfac import KFAC
 from torch_kfac.layers import FullyConnectedFisherBlock
 from hessianfree.optimizer import HessianFree
+
+from torch_kfac.layers.fisher_block_factory import FisherBlockFactory
 
 
 def calculate_sparsity(grad: Tensor):
@@ -162,35 +162,7 @@ def train(model, optimizer, data, preconditioner, update_cov):
                 loss.backward(retain_graph=True)
 
             if update_cov:
-                train_nodes = sum(data.train_mask)
-                fishy_stuff = False
-                if fishy_stuff:
-                    sensitivities_shapes = []
-                    activations_shapes = []
-                    for block in preconditioner.blocks:
-                        if isinstance(block, FullyConnectedFisherBlock):
-                            # PSGD doesn't filter the sensitivities or activations.
-                            # block._activations = block._activations[data.train_mask]
-                            # block._activations = block._activations[data.train_mask]
-
-                            # difference: PSGD multiplies gradient in backward hook with shape[1] instead of shape[0].
-                            block._sensitivities = block._sensitivities / block._sensitivities.shape[0] * \
-                                                   block._sensitivities.shape[1]
-                            sensitivities_shapes.append(block._sensitivities.shape)
-                            activations_shapes.append(block._activations.shape)
-
                 preconditioner.update_cov()
-                if fishy_stuff:
-                    i = 0
-                    for block in preconditioner.blocks:
-                        if isinstance(block, FullyConnectedFisherBlock):
-                            # The PSGD implementation does not divide by count of nodes, but by count of training nodes.
-                            block._activations_cov.value = block._activations_cov.value * activations_shapes[i][
-                                0] / train_nodes
-                            block._sensitivities_cov.value = block._sensitivities_cov.value * \
-                                                             sensitivities_shapes[i][
-                                                                 0] / train_nodes
-                            i += 1
                 """for block in preconditioner.blocks:
                     if isinstance(block, FullyConnectedFisherBlock):
                         print_sparsity_ratio(block.sensitivity_covariance, "Sensitivities cov")
@@ -289,6 +261,7 @@ if __name__ == "__main__":
                         dataset.num_classes, args.heads, args.dropout,
                         args.hidden_layers)
         lr = args.lr
+
         weight_decay = args.weight_decay
         kfac_lr = args.kfac_lr
 
@@ -303,10 +276,17 @@ if __name__ == "__main__":
             # damping corresponds to eps in PSGD.
             # cov_ema_decay corresponds to 1-alpha in PSGD.
             # PSGD does not implement momentum.
+            factory = FisherBlockFactory([(nn.Linear, LinearBlock)])
+            #factory = None
             preconditioner = KFAC(model, args.kfac_lr, args.kfac_damping, momentum=0.0, damping_adaptation_decay=0.99,
                                   cov_ema_decay=args.cov_ema_decay, enable_pi_correction=False, adapt_damping=True,
-                                  damping_adaptation_interval=5, update_cov_manually=True)
-            linear_blocks = sum(1 for block in preconditioner.blocks if isinstance(block, FullyConnectedFisherBlock))
+                                  damping_adaptation_interval=5, update_cov_manually=True,
+                                  block_factory=factory)
+            for block in preconditioner.blocks:
+                if isinstance(block, LinearBlock):
+                    block.train_mask = data["train_mask"]
+
+            linear_blocks = sum(1 for block in preconditioner.blocks if isinstance(block, LinearBlock))
             print(f"Preconditioning active on {linear_blocks} blocks.")
         elif args.baseline in ["hessian", "ggn"] and not enable_kfac:
             preconditioner = HessianFree(model.parameters(), verbose=False, curvature_opt=args.baseline, cg_max_iter=1000,
@@ -333,7 +313,7 @@ if __name__ == "__main__":
         return losses, val_accuracies, test_accuracies, train_accuracies
 
     _, _, fig, group_results = plot_training(args.epochs, args.runs, train_model, [
-        {"kfac": False}, {"kfac": True}
+        {"kfac": False}, {"kfac": True},
     ], [args.baseline, "KFAC"])
 
     fig.suptitle(f"{args.model} Training on {args.dataset}", fontsize=28)
