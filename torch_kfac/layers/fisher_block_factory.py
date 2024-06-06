@@ -3,6 +3,8 @@ from typing import Type, Tuple, Sequence
 from torch import nn
 
 from torch_kfac.layers import FisherBlock, FullyConnectedFisherBlock, Identity, ConvFisherBlock
+from torch_kfac.layers.bias_block import BiasFisherBlock
+from torch_kfac.layers.bias_layer import Bias
 from torch_kfac.layers.fisher_block import ExtensionFisherBlock
 
 ModuleBlockList = Sequence[Tuple[Type[nn.Module], Type[ExtensionFisherBlock]]]
@@ -12,6 +14,7 @@ default_blocks: ModuleBlockList = (
     (nn.Conv1d, ConvFisherBlock),
     (nn.Conv2d, ConvFisherBlock),
     (nn.Conv3d, ConvFisherBlock),
+    (Bias, BiasFisherBlock)
 )
 
 

@@ -2,7 +2,7 @@ import unittest
 
 import torch
 from torch import tensor, mean
-from torch.testing import assert_allclose
+from torch.testing import assert_close
 
 from torch_kfac.utils import compute_cov
 
@@ -20,4 +20,4 @@ class UtilsTest(unittest.TestCase):
         data_matrix[:, 1] -= means[1]
         expected_cov = tensor([[343, 260], [260, 633.333]], dtype=torch.float)
         actual_cov = compute_cov(data_matrix, normalizer=2.)
-        assert_allclose(actual_cov, expected_cov)
+        assert_close(actual_cov, expected_cov)

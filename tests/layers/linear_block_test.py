@@ -8,7 +8,7 @@ from torch import nn, tensor
 from torch.testing import assert_close
 
 
-class TestModel(nn.Module):
+class MockModel(nn.Module):
     def __init__(self):
         super().__init__()
         self.first_linear = nn.Linear(5, 2, True)
@@ -32,7 +32,7 @@ class TestModel(nn.Module):
 class FullyConnectedFisherBlockTest(unittest.TestCase):
 
     def setUp(self):
-        self.model = TestModel()
+        self.model = MockModel()
         self.optimizer = KFAC(self.model, 9e-3, 1e-3)
 
     def test_constructor(self):

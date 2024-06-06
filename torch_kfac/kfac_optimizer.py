@@ -1,6 +1,7 @@
 import numpy as np
-from typing import Dict, Iterable, List, Optional, Tuple
+from typing import Dict, Iterable, List, Optional, Tuple, Union
 import torch
+from torch import Tensor, tensor
 
 from .layers import init_fisher_block, FisherBlock
 from .layers.fisher_block_factory import FisherBlockFactory
@@ -12,7 +13,7 @@ class KFAC(object):
                  model: torch.nn.Module,
                  learning_rate: float,
 
-                 damping: torch.Tensor,
+                 damping: Union[torch.Tensor, float],
                  adapt_damping: bool = False,
                  damping_adaptation_decay: float = 0.99,
                  damping_adaptation_interval: int = 5,
@@ -80,7 +81,7 @@ class KFAC(object):
 
         device = next(model.parameters()).device
         dtype = next(model.parameters()).dtype
-        self._damping = torch.tensor(damping, device=device, dtype=dtype)
+        self._damping = damping if isinstance(damping, Tensor) else tensor(damping)
         self._adapt_damping = adapt_damping
         self._damping_adaptation_decay = damping_adaptation_decay
         self._damping_adaptation_interval = damping_adaptation_interval

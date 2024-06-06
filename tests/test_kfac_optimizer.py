@@ -1,12 +1,13 @@
 import unittest
 
-from torch import nn, tensor
-from torch import tensor
+from torch import nn, float64, tensor
 from torch.nn import Linear
+from torch.testing import assert_close
 
 from torch_kfac import KFAC
 from torch_kfac.layers import FullyConnectedFisherBlock, Identity, ConvFisherBlock
 from torch_kfac.layers.fisher_block_factory import FisherBlockFactory
+from torch_kfac.utils import inverse_by_cholesky
 
 
 class MockModel(nn.Module):
@@ -26,7 +27,7 @@ class KfacOptimizerTest(unittest.TestCase):
         Checks if the enable_pi_correction parameter is correctly copied to the Fisher blocks.
         """
         model = Linear(3, 4)
-        preconditioner = KFAC(model, 0.01, tensor(1e-2), enable_pi_correction=False)
+        preconditioner = KFAC(model, 0.01, 1e-2, enable_pi_correction=False)
         self.assertEqual(1, len(preconditioner.blocks))
         self.assertFalse(preconditioner.blocks[0]._enable_pi_correction)
 
@@ -34,7 +35,7 @@ class KfacOptimizerTest(unittest.TestCase):
         """Tests that the KFAC constructor correctly creates Linear and Convolutional blocks
         for the corresponding layers."""
         model = MockModel()
-        optimizer = KFAC(model, 0.01, tensor(1e-2))
+        optimizer = KFAC(model, 0.01, 1e-2)
         # model.modules(): SimpleModule, Linear, ReLU, Conv1d, Conv2d, Conv3d, ConvTranspose1d.
         self.assertIsInstance(optimizer.blocks[0], Identity)
         self.assertIsInstance(optimizer.blocks[1], FullyConnectedFisherBlock)
