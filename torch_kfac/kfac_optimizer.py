@@ -3,6 +3,7 @@ from typing import Dict, Iterable, List, Optional, Tuple
 import torch
 
 from .layers import init_fisher_block, FisherBlock
+from .layers.fisher_block_factory import FisherBlockFactory
 from .utils import Lock, inner_product_pairs, scalar_product_pairs
 
 
@@ -29,13 +30,13 @@ class KFAC(object):
 
                  update_cov_manually: bool = False,
                  center: bool = False,
-                 apply_gradients: bool = True,
-                 enable_pi_correction: bool = True) -> None:
+                 enable_pi_correction: bool = True,
+                 block_factory: FisherBlockFactory = None) -> None:
         """Creates the KFAC Optimizer object.
 
         Args:
             model (torch.nn.Module): A `torch.nn.Module` to optimize.
-            learning_rate (float): The initial learning rate
+            learning_rate (float): The initial learning rate. Set to zero to disable gradient updates.
             damping (torch.Tensor): This quantity times the identiy matrix is (approximately) added
                 to the matrix being estimated. - This relates to the "trust" in the second order approximation.
             adapt_damping (bool, optional): If True we adapt the damping according to the Levenberg-Marquardt
@@ -60,11 +61,9 @@ class KFAC(object):
                 or when you want your covariances w.r.t. the model distribution rather than the loss function. Defaults to False.
             center (bool, optional): If set to True the activations and sensitivities are centered. This is useful when dealing with
                 unnormalized distributions. Defaults to False.
-            apply_gradients (bool, optional): If set to True, the gradients will be applied to the parameters according
-                to gradient descent and no further optimizer needs to be applied to the model. If set to false, you can
-                use your own first order optimizer (like Adam) to apply the gradients to the model parameters.
             enable_pi_correction (bool, optional): If set to true, the pi-correction for the Tikhonov regularization
                 will be calculated.
+            block_factory (FisherBlockFactory, optional): A block factory which is used to create the fisher blocks.
         """
 
         legal_momentum_types = ['regular', 'adam']
@@ -91,7 +90,6 @@ class KFAC(object):
         self._prev_loss = torch.tensor(np.nan, device=device, dtype=dtype)
         self._rho = torch.tensor(np.nan, device=device, dtype=dtype)
         self._min_damping = min_damping
-        self._apply_gradients = apply_gradients
 
         self._weight_decay = weight_decay
         self._l2_reg = l2_reg
@@ -104,9 +102,11 @@ class KFAC(object):
 
         self.track_forward = Lock()
         self.track_backward = Lock()
+        if block_factory is None:
+            block_factory = FisherBlockFactory()
         for module in model.modules():
             self.blocks.append(
-                init_fisher_block(
+                block_factory.create_block(
                     module,
                     center=center,
                     enable_pi_correction=enable_pi_correction,
@@ -177,8 +177,7 @@ class KFAC(object):
             grads_and_layers, precon_grads_and_layers)
         return scalar_product_pairs(coeff, precon_grads_and_layers)
 
-    def _multiply_preconditioner(self, grads_and_layers: Iterable[Tuple[Iterable[torch.Tensor], FisherBlock]])\
-            -> Iterable[Tuple[Iterable[torch.Tensor], FisherBlock]]:
+    def _multiply_preconditioner(self, grads_and_layers: Iterable[Tuple[Iterable[torch.Tensor], FisherBlock]]) -> Iterable[Tuple[Iterable[torch.Tensor], FisherBlock]]:
         return tuple((layer.multiply_preconditioner(grads, self.damping), layer) for (grads, layer) in grads_and_layers)
 
     def _update_velocities(self, grads_and_layers: Iterable[Tuple[Iterable[torch.Tensor], FisherBlock]], decay: float, vec_coeff=1.0) -> Iterable[Tuple[Iterable[torch.Tensor], FisherBlock]]:
@@ -322,7 +321,7 @@ class KFAC(object):
         for precon_grad, layer in raw_updates_and_layers:
             layer.set_gradients(precon_grad)
 
-        if self._apply_gradients:
+        if self.learning_rate != 0:
             # Do gradient step: apply gradients to parameters according to gradient descent.
             for param in self.model.parameters():
                 if param.grad is not None:
