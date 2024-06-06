@@ -1,4 +1,4 @@
-from typing import Type, Tuple, Sequence
+from typing import Type, Tuple, Sequence, List, Union
 
 from torch import nn
 
@@ -7,9 +7,11 @@ from torch_kfac.layers.bias_block import BiasFisherBlock
 from torch_kfac.layers.bias_layer import Bias
 from torch_kfac.layers.fisher_block import ExtensionFisherBlock
 
-ModuleBlockList = Sequence[Tuple[Type[nn.Module], Type[ExtensionFisherBlock]]]
+ModuleBlockDefinition = Tuple[Type[nn.Module], Type[ExtensionFisherBlock]]
+ModuleBlockSequence = Sequence[ModuleBlockDefinition]
+ModuleBlockList = List[ModuleBlockDefinition]
 
-default_blocks: ModuleBlockList = (
+default_blocks: ModuleBlockSequence = (
     (nn.Linear, FullyConnectedFisherBlock),
     (nn.Conv1d, ConvFisherBlock),
     (nn.Conv2d, ConvFisherBlock),
@@ -24,18 +26,18 @@ class FisherBlockFactory:
     correct fisher block for each torch module.
     """
 
-    def __init__(self, blocks_to_register: ModuleBlockList = default_blocks):
+    def __init__(self, blocks_to_register: Union[ModuleBlockSequence, ModuleBlockList] = default_blocks):
         """
         Initializes the fisher block factory.
         Args:
             blocks_to_register: The block types which should be registered. By default, registers blocks for
                 Linear and Convolutional layers.
         """
-        self.blocks: ModuleBlockList = []
+        self.blocks: ModuleBlockSequence = []
 
         self.register_blocks(blocks_to_register)
 
-    def register_blocks(self, block_list: ModuleBlockList):
+    def register_blocks(self, block_list: Union[ModuleBlockSequence, ModuleBlockList]):
         for module_type, block_type in block_list:
             self.register_block(module_type, block_type)
 
