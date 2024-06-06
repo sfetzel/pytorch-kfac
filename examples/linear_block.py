@@ -17,10 +17,10 @@ class LinearBlock(FullyConnectedFisherBlock):
     def backward_hook(self, module: Linear, grad_inp: Tensor, grad_out: Tensor) -> None:
         assert self.train_mask is not None
         grad_out = (grad_out[0][self.train_mask],)
-        super(FullyConnectedFisherBlock, self).backward_hook(module, grad_out, grad_inp)
+        super(LinearBlock, self).backward_hook(module, grad_inp, grad_out)
 
     @no_grad()
     def forward_hook(self, module: Linear, input_data: Tensor, output_data: Tensor) -> None:
         assert self.train_mask is not None
         input_data = (input_data[0][self.train_mask],)
-        super(FullyConnectedFisherBlock, self).forward_hook(module, input_data, output_data)
+        super(LinearBlock, self).forward_hook(module, input_data, output_data)

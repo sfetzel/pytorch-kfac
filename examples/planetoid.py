@@ -279,7 +279,7 @@ if __name__ == "__main__":
             factory = FisherBlockFactory([(nn.Linear, LinearBlock)])
             #factory = None
             preconditioner = KFAC(model, args.kfac_lr, args.kfac_damping, momentum=0.0, damping_adaptation_decay=0.99,
-                                  cov_ema_decay=args.cov_ema_decay, enable_pi_correction=False, adapt_damping=True,
+                                  cov_ema_decay=args.cov_ema_decay, enable_pi_correction=True, adapt_damping=True,
                                   damping_adaptation_interval=5, update_cov_manually=True,
                                   block_factory=factory)
             for block in preconditioner.blocks:
