@@ -108,10 +108,10 @@ class CLS(Module):
         return x
 
 
-class Net(Module):
+class GCN(Module):
     def __init__(self, dataset, hidden_layers: int = 1, hidden_dim: int = 16,
                  dropout: float = 0.5):
-        super(Net, self).__init__()
+        super(GCN, self).__init__()
         in_features = dataset.num_features
         self.crds = ModuleList()
         for i in range(hidden_layers):
@@ -198,6 +198,74 @@ def evaluate(model, data):
     return outs
 
 
+def train_model(dataset, args: argparse.Namespace, device):
+    """
+    Trains a model with a planetoid dataset.
+    Args:
+        dataset: the dataset which is used for training
+        args: the arguments for the model and the training.
+    """
+    data = dataset[0].to(device)
+    enable_kfac = args.enable_kfac
+    if args.model == "GCN":
+        model = GCN(dataset, hidden_layers=args.hidden_layers,
+                    hidden_dim=args.hidden_channels, dropout=args.dropout)
+    elif args.model == "GAT":
+        model = GAT(dataset.num_features, args.hidden_channels,
+                    dataset.num_classes, args.heads, args.dropout,
+                    args.hidden_layers)
+    lr = args.lr
+
+    weight_decay = args.weight_decay
+    kfac_lr = args.kfac_lr
+
+    model.to(device).reset_parameters()
+    optimizer_lr = kfac_lr if enable_kfac else lr
+    optimizer = Adam(model.parameters(), lr=optimizer_lr, weight_decay=weight_decay)
+    #optimizer = SGD(model.parameters(), lr=lr, weight_decay=weight_decay)
+
+    preconditioner = None
+
+    if enable_kfac:
+        # damping corresponds to eps in PSGD.
+        # cov_ema_decay corresponds to 1-alpha in PSGD.
+        # PSGD does not implement momentum.
+        factory = FisherBlockFactory([(nn.Linear, LinearBlock)])
+        #factory = None
+        preconditioner = KFAC(model, 0.0, args.kfac_damping, momentum=0.0, damping_adaptation_decay=0.99,
+                              cov_ema_decay=args.cov_ema_decay, enable_pi_correction=True, adapt_damping=True,
+                              damping_adaptation_interval=5, update_cov_manually=True,
+                              block_factory=factory)
+        for block in preconditioner.blocks:
+            if isinstance(block, LinearBlock):
+                block.train_mask = data["train_mask"]
+
+        linear_blocks = sum(1 for block in preconditioner.blocks if isinstance(block, LinearBlock))
+        print(f"Preconditioning active on {linear_blocks} blocks.")
+    elif args.baseline in ["hessian", "ggn"] and not enable_kfac:
+        preconditioner = HessianFree(model.parameters(), verbose=False, curvature_opt=args.baseline, cg_max_iter=1000,
+                                lr=0.0, damping=args.hessianfree_damping, adapt_damping=False)
+
+    if preconditioner is not None:
+        print(f"Preconditioner: {preconditioner.__class__}")
+
+    if torch.cuda.is_available():
+        torch.cuda.synchronize()
+
+    epochs_tqdm = tqdm(range(1, args.epochs + 1))
+    losses, val_accuracies, test_accuracies, train_accuracies = [], [], [], []
+    for epoch in epochs_tqdm:
+        train(model, optimizer, data, preconditioner, (epoch-1) % args.cov_update_freq == 0)
+        eval_info = evaluate(model, data)
+        epochs_tqdm.set_description(
+            f"Val loss:{eval_info['val loss']:.2f}, Train loss: {eval_info['train loss']:.3f}, Val acc: {eval_info['val acc']:.3f}, Test acc: {eval_info['test acc']:.3f}")
+        losses.append(eval_info['train loss'])
+        val_accuracies.append(eval_info['val acc'] * 100)
+        test_accuracies.append(eval_info['test acc'] * 100)
+        train_accuracies.append(eval_info['train acc'] * 100)
+
+    return losses, val_accuracies, test_accuracies, train_accuracies
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--dataset', type=str, default='Cora')
@@ -251,68 +319,12 @@ if __name__ == "__main__":
     gamma = None
     runs = 1
 
-    def train_model(params):
-        enable_kfac = params["kfac"]
-        if args.model == "GCN":
-            model = Net(dataset, hidden_layers=args.hidden_layers,
-                        hidden_dim=args.hidden_channels, dropout=args.dropout)
-        elif args.model == "GAT":
-            model = GAT(dataset.num_features, args.hidden_channels,
-                        dataset.num_classes, args.heads, args.dropout,
-                        args.hidden_layers)
-        lr = args.lr
+    def plot_training_train_model(params):
+        merged_args = {**vars(args), "enable_kfac": params["kfac"]}
+        args_copy = argparse.Namespace(**merged_args)
+        return train_model(dataset, args_copy, device)
 
-        weight_decay = args.weight_decay
-        kfac_lr = args.kfac_lr
-
-        model.to(device).reset_parameters()
-        optimizer_lr = kfac_lr if enable_kfac else lr
-        optimizer = Adam(model.parameters(), lr=optimizer_lr, weight_decay=weight_decay)
-        #optimizer = SGD(model.parameters(), lr=lr, weight_decay=weight_decay)
-
-        preconditioner = None
-
-        if enable_kfac:
-            # damping corresponds to eps in PSGD.
-            # cov_ema_decay corresponds to 1-alpha in PSGD.
-            # PSGD does not implement momentum.
-            factory = FisherBlockFactory([(nn.Linear, LinearBlock)])
-            #factory = None
-            preconditioner = KFAC(model, args.kfac_lr, args.kfac_damping, momentum=0.0, damping_adaptation_decay=0.99,
-                                  cov_ema_decay=args.cov_ema_decay, enable_pi_correction=True, adapt_damping=True,
-                                  damping_adaptation_interval=5, update_cov_manually=True,
-                                  block_factory=factory)
-            for block in preconditioner.blocks:
-                if isinstance(block, LinearBlock):
-                    block.train_mask = data["train_mask"]
-
-            linear_blocks = sum(1 for block in preconditioner.blocks if isinstance(block, LinearBlock))
-            print(f"Preconditioning active on {linear_blocks} blocks.")
-        elif args.baseline in ["hessian", "ggn"] and not enable_kfac:
-            preconditioner = HessianFree(model.parameters(), verbose=False, curvature_opt=args.baseline, cg_max_iter=1000,
-                                    lr=0.0, damping=args.hessianfree_damping, adapt_damping=False)
-
-        if preconditioner is not None:
-            print(f"Preconditioner: {preconditioner.__class__}")
-
-        if torch.cuda.is_available():
-            torch.cuda.synchronize()
-
-        epochs_tqdm = tqdm(range(1, epochs + 1))
-        losses, val_accuracies, test_accuracies, train_accuracies = [], [], [], []
-        for epoch in epochs_tqdm:
-            train(model, optimizer, data, preconditioner, (epoch-1) % args.cov_update_freq == 0)
-            eval_info = evaluate(model, data)
-            epochs_tqdm.set_description(
-                f"Val loss:{eval_info['val loss']:.2f}, Train loss: {eval_info['train loss']:.3f}, Val acc: {eval_info['val acc']:.3f}, Test acc: {eval_info['test acc']:.3f}")
-            losses.append(eval_info['train loss'])
-            val_accuracies.append(eval_info['val acc'] * 100)
-            test_accuracies.append(eval_info['test acc'] * 100)
-            train_accuracies.append(eval_info['train acc'] * 100)
-
-        return losses, val_accuracies, test_accuracies, train_accuracies
-
-    _, _, fig, group_results = plot_training(args.epochs, args.runs, train_model, [
+    _, _, fig, group_results = plot_training(args.epochs, args.runs, plot_training_train_model, [
         {"kfac": False}, {"kfac": True},
     ], [args.baseline, "KFAC"])
 

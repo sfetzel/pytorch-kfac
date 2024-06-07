@@ -80,7 +80,7 @@ class FullyConnectedFisherBlock(ExtensionFisherBlock):
             return mat_grads,
 
     @property
-    def has_bias(self) -> bool:
+    def has_bias(self) -> None:
         return self.module.bias is not None
 
     @property
