@@ -1,3 +1,4 @@
+import gc
 import os
 import json
 from pathlib import Path
@@ -6,11 +7,12 @@ from collections import defaultdict
 import requests
 import argparse
 import numpy as np
+import torch
 from tqdm.auto import tqdm
 from sklearn.model_selection import StratifiedKFold
 
 from torch.optim import Adam
-from torch import no_grad, cuda, long, device as torch_device, random as torch_random, load, save
+from torch import no_grad, cuda, long, device as torch_device, random as torch_random, load, save, nn
 import torch.nn.functional as F
 from torch.optim.lr_scheduler import StepLR
 from torch.nn import Module, CrossEntropyLoss
@@ -23,9 +25,12 @@ from torch_geometric.loader import DataLoader
 
 from examples.gat import GAT
 from examples.gat_conv import GATConv
+from examples.linear_block import LinearBlock
 from gin import GIN
 from torch_kfac import KFAC
 from torch_kfac.layers import FullyConnectedFisherBlock
+from torch_kfac.layers.fisher_block_factory import FisherBlockFactory
+
 
 class GAT(Module):
     def __init__(self, in_channels, hidden_channels, out_channels, heads, dropout):
@@ -99,7 +104,7 @@ def train(model, data, y, criterion, optimizer, scheduler, preconditioner, enabl
 
     if enable_preconditioner:
         try:
-            preconditioner.step()
+            preconditioner.step(loss_train)
         except:
             print("Problem in KFAC preconditioner! Continuing without")
 
@@ -230,7 +235,7 @@ if __name__ == '__main__':
     parser.add_argument("--batch_size", type=int, default=128)
     parser.add_argument("--device", type=str, default="cuda" if cuda.is_available() else "cpu")
     parser.add_argument("--heads", type=int, default=8, help='Heads for GAT')
-    parser.add_argument('--model', type=str, required=True)
+    parser.add_argument('--model', type=str, required=True, choices=["GIN", "GAT"])
     args = parser.parse_args()
 
     device = torch_device(args.device) if all([args.device[:4] == "cuda", cuda.is_available()]) else torch_device("cpu")
@@ -332,7 +337,11 @@ if __name__ == '__main__':
                                 print(f"Model # Parameters {sum([p.numel() for p in model.parameters()])}")
                                 optimizer = Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
                                 scheduler = StepLR(optimizer, step_size=args.step_size, gamma=0.5)
-                                preconditioner = KFAC(model, 0, kfac_damping if kfac_damping is not None else 0, **preconditioner_args)
+                                # we can use the regular preconditioning blocks, because
+                                # only the training data is used for the loss.
+                                factory = FisherBlockFactory()
+                                preconditioner = KFAC(model, 0, kfac_damping if kfac_damping is not None else 0, **preconditioner_args,
+                                                      block_factory=factory)
                                 if kfac_damping is not None:
                                     linear_blocks = sum(1 for block in preconditioner.blocks if isinstance(block, FullyConnectedFisherBlock))
                                     print(f"Preconditioning active on {linear_blocks} blocks.")
@@ -365,6 +374,8 @@ if __name__ == '__main__':
                                 print(f"MS {loop_counter}/{n_params} Epoch {epoch + 1} Best Epoch {early_stopper.best_epoch} Val acc {val_acc:0.1f} Best Val Acc {best_val_acc:0.2f} Best Fold Val Acc  {best_acc_across_folds:0.2f} Best Fold Val Loss {best_loss_across_folds:0.2f}")
 
                                 loop_counter += 1
+                                gc.collect()
+                                torch.cuda.empty_cache()
 
         # Free memory after model selection
         del model

@@ -14,7 +14,6 @@ from torch_geometric.nn import BatchNorm
 from gat_conv import GATConv
 #from torch_geometric.nn.conv import GATConv
 from tqdm.auto import tqdm
-from planetoid import seed_everything
 from torch_kfac import KFAC
 from torch_kfac.layers import FullyConnectedFisherBlock
 

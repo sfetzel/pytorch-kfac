@@ -21,7 +21,7 @@ import json
 
 from gcn_conv import GCNConv
 from torch_kfac import KFAC
-from torch_kfac.layers import FullyConnectedFisherBlock
+from torch_kfac.layers import FullyConnectedFisherBlock, Bias, BiasFisherBlock
 from hessianfree.optimizer import HessianFree
 
 from torch_kfac.layers.fisher_block_factory import FisherBlockFactory
@@ -45,7 +45,7 @@ def print_sparsity_ratio(grad: Tensor, caption):
 
 class GAT(torch.nn.Module):
     def __init__(self, in_channels, hidden_channels, out_channels, heads, dropout,
-                 hidden_layers=1):
+                 hidden_layers=1, use_heads_last_channel=False):
         super().__init__()
         self.convs = ModuleList()
         for _ in range(hidden_layers):
@@ -53,9 +53,8 @@ class GAT(torch.nn.Module):
             in_channels = hidden_channels * heads
 
         # On the Pubmed dataset, use `heads` output heads in `conv2`.
-        self.conv_last = GATConv(in_channels, out_channels, heads=1,
+        self.conv_last = GATConv(in_channels, out_channels, heads=heads if use_heads_last_channel else 1,
                                  concat=False, dropout=dropout)
-        self.batch_norm = BatchNorm(hidden_channels * heads)
         self.dropout = dropout
 
     def reset_parameters(self):
@@ -68,7 +67,6 @@ class GAT(torch.nn.Module):
         for conv in self.convs:
             x = F.dropout(x, p=self.dropout, training=self.training)
             x = conv(x, edge_index)
-            #x = self.batch_norm(x)
             x = F.elu(x)
 
         x = F.dropout(x, p=self.dropout, training=self.training)
@@ -213,7 +211,7 @@ def train_model(dataset, args: argparse.Namespace, device):
     elif args.model == "GAT":
         model = GAT(dataset.num_features, args.hidden_channels,
                     dataset.num_classes, args.heads, args.dropout,
-                    args.hidden_layers)
+                    args.hidden_layers, use_heads_last_channel=args.dataset == "PubMed")
     lr = args.lr
 
     weight_decay = args.weight_decay
@@ -230,6 +228,7 @@ def train_model(dataset, args: argparse.Namespace, device):
         # damping corresponds to eps in PSGD.
         # cov_ema_decay corresponds to 1-alpha in PSGD.
         # PSGD does not implement momentum.
+        # (Bias, BiasFisherBlock)
         factory = FisherBlockFactory([(nn.Linear, LinearBlock)])
         #factory = None
         preconditioner = KFAC(model, 0.0, args.kfac_damping, momentum=0.0, damping_adaptation_decay=0.99,
@@ -244,7 +243,7 @@ def train_model(dataset, args: argparse.Namespace, device):
         print(f"Preconditioning active on {linear_blocks} blocks.")
     elif args.baseline in ["hessian", "ggn"] and not enable_kfac:
         preconditioner = HessianFree(model.parameters(), verbose=False, curvature_opt=args.baseline, cg_max_iter=1000,
-                                lr=0.0, damping=args.hessianfree_damping, adapt_damping=False)
+                                lr=0.0, damping=args.hessianfree_damping)
 
     if preconditioner is not None:
         print(f"Preconditioner: {preconditioner.__class__}")
@@ -285,6 +284,7 @@ if __name__ == "__main__":
     parser.add_argument('--runs', type=int, default=2)
     parser.add_argument('--cov_ema_decay', type=float, default=0.0)
     parser.add_argument('--results_dir', type=str, default="results")
+    parser.add_argument('--file_name', type=str, default=None)
     args = parser.parse_args()
 
     if not os.path.exists(args.results_dir):
@@ -329,7 +329,9 @@ if __name__ == "__main__":
     ], [args.baseline, "KFAC"])
 
     fig.suptitle(f"{args.model} Training on {args.dataset}", fontsize=28)
-    filename = find_filename(os.path.join(args.results_dir, f"{args.model}-{args.dataset}"), "svg")
+    filename = args.file_name
+    if filename is None:
+        filename = find_filename(os.path.join(args.results_dir, f"{args.model}-{args.dataset}"), "svg")
     print(filename)
     fig.savefig(f"{filename}.svg", metadata={
         "Description": f"Experiment properties: {str(experiment_metadata)}, Grouped results: {str(group_results)}"
