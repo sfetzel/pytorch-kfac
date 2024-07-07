@@ -104,7 +104,6 @@ class CLS(Module):
 
     def forward(self, x, edge_index, mask=None):
         x = self.conv(x, edge_index)
-        x = F.log_softmax(x, dim=1)
         return x
 
 
@@ -207,21 +206,25 @@ def train_model(dataset, args: argparse.Namespace, device):
     """
     data = dataset[0].to(device)
     enable_kfac = args.enable_kfac
+    weight_decay = args.weight_decay
     if args.model == "GCN":
         model = GCN(dataset, hidden_layers=args.hidden_layers,
                     hidden_dim=args.hidden_channels, dropout=args.dropout)
+        parameters = [dict(params=model.crds.parameters(), weight_decay=weight_decay),
+                      dict(params=model.cls.parameters(), weight_decay=0)]
     elif args.model == "GAT":
         model = GAT(dataset.num_features, args.hidden_channels,
                     dataset.num_classes, args.heads, args.dropout,
                     args.hidden_layers)
+        parameters = [dict(params=model.convs.parameters(), weight_decay=weight_decay),
+                      dict(params=model.conv_last.paramterers(), weight_decay=0)]
     lr = args.lr
 
-    weight_decay = args.weight_decay
     kfac_lr = args.kfac_lr
 
     model.to(device).reset_parameters()
     optimizer_lr = kfac_lr if enable_kfac else lr
-    optimizer = Adam(model.parameters(), lr=optimizer_lr, weight_decay=weight_decay)
+    optimizer = Adam(parameters, lr=optimizer_lr, weight_decay=weight_decay)
     #optimizer = SGD(model.parameters(), lr=lr, weight_decay=weight_decay)
 
     preconditioner = None

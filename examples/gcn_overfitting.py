@@ -4,6 +4,8 @@ from random import sample
 from pandas import DataFrame
 from torch import Tensor, no_grad
 from torch.nn import Linear
+from torch_geometric.nn.conv.gcn_conv import gcn_norm
+from torch_geometric.utils import add_random_edge
 
 from examples.linear_block import LinearBlock
 from planetoid import GCN
@@ -33,7 +35,7 @@ class LinearBlockOverfit(FullyConnectedFisherBlock):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.train_mask = None
-        self.add_nodes = 5
+        self.add_nodes = 0
 
     @no_grad()
     def backward_hook(self, module: Linear, grad_inp: Tensor, grad_out: Tensor) -> None:
@@ -84,29 +86,46 @@ def init_trainig():
         dict(params=model.cls.parameters(), weight_decay=0)
     ], lr=args.lr)  # Only perform weight-decay on first convolution.
 
-    factory = FisherBlockFactory([(nn.Linear, LinearBlockOverfit)])
+    #factory = FisherBlockFactory([(nn.Linear, LinearBlock)])
+    factory = None
     preconditioner = KFAC(model, 0.0, args.kfac_damping, momentum=0.0, damping_adaptation_decay=0.99,
                           cov_ema_decay=args.cov_ema_decay, enable_pi_correction=True, adapt_damping=True,
                           damping_adaptation_interval=5,
                           block_factory=factory)
 
-    for block in preconditioner.blocks:
-        if isinstance(block, LinearBlockOverfit):
-            block.train_mask = data["train_mask"]
     return model, optimizer, preconditioner
 
 
-def train(model, optimizer, preconditioner):
+def train(model, optimizer, preconditioner, add_node_probability):
     model.train()
     optimizer.zero_grad()
+
+    original_edge_index = data.edge_index.clone()
+
+    edge_index, added_edges = add_random_edge(data.edge_index, p=add_node_probability)
+    data.edge_index = edge_index
+    added_count = added_edges.shape[1]
+    # remove adjacency matrix cache.
+    for conv in model.crds:
+        conv._cached_edge_index = gcn_norm(  # yapf: disable
+                data.edge_index, None, data.num_nodes,
+                False, True, dtype=data.x.dtype)
+        #conv._cached_edge_index[1][-added_count:] *= 0.01
+
+    model.cls._cached_edge_index = gcn_norm(  # yapf: disable
+                data.edge_index, None, data.num_nodes,
+                False, True, dtype=data.x.dtype)
+    #model.cls._cached_edge_index[1][-added_count:] *= 0.01
+
+
     with preconditioner.track_forward():
-        #out = model(data.x, data.edge_index, data.edge_attr)
         out = model(data)
         loss = F.cross_entropy(out[data.train_mask], data.y[data.train_mask])
     with preconditioner.track_backward():
         loss.backward()
     preconditioner.step(loss)
     optimizer.step()
+    data.edge_index = original_edge_index
     return float(loss)
 
 
@@ -122,29 +141,35 @@ def test(model):
 
 results = []
 
-for add_nodes in [0, 5, 10, 20, 40, 80]:
+for add_node_probability in [0.0, 0.001, 0.005, 0.01, 0.02, 0.05, 0.25]:
     test_accs = []
+    losses = []
     for _ in range(args.runs):
         model, optimizer, preconditioner = init_trainig()
-        for block in preconditioner.blocks:
-            if isinstance(block, LinearBlockOverfit):
-                block.add_nodes = add_nodes
+
         best_val_acc = test_acc = 0
+        best_loss = 0
         times = []
         for epoch in range(1, args.epochs + 1):
             start = time.time()
-            loss = train(model, optimizer, preconditioner)
+            loss = train(model, optimizer, preconditioner, add_node_probability)
             train_acc, val_acc, tmp_test_acc = test(model)
             if val_acc > best_val_acc:
                 best_val_acc = val_acc
+                best_loss = loss
                 if tmp_test_acc > test_acc:
                     test_acc = tmp_test_acc
             log(Epoch=epoch, Loss=loss, Train=train_acc, Val=val_acc, Test=test_acc)
             times.append(time.time() - start)
         print(f'Median time per epoch: {torch.tensor(times).median():.4f}s')
         test_accs.append(test_acc)
-    results.append([add_nodes, torch.mean(torch.tensor(test_accs)).item(), torch.std(torch.tensor(test_accs)).item()])
+        losses.append(best_loss)
+    results.append([add_node_probability*100,
+                    round(torch.mean(torch.tensor(test_accs)).item(), 3),
+                    round(torch.std(torch.tensor(test_accs)).item(), 3),
+                    round(torch.mean(torch.tensor(losses)).item(), 3),
+                    round(torch.std(torch.tensor(losses)).item(), 3)])
 
-df = DataFrame(results, columns=["add_nodes", "best_test_acc_mean", "best_test_acc_std"])
-df.to_csv(osp.join(osp.dirname(osp.realpath(__file__)), "add_nodes.csv"), index=False)
+df = DataFrame(results, columns=["add_nodes", "best_test_acc_mean", "best_test_acc_std", "best_loss_mean", "best_loss_std"])
+df.to_csv(osp.join(osp.dirname(osp.realpath(__file__)), "add-nodes.csv"), index=False)
 print(df)
