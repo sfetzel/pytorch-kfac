@@ -73,7 +73,7 @@ class FisherBlock(object):
     def full_fisher_block(self):
         left_factor = self.activation_covariance
         right_factor = self.sensitivity_covariance
-        return self._renorm_coeff * kronecker_product(left_factor, right_factor)
+        return self.renorm_coeff * torch.kron(left_factor, right_factor)
     
     def reset(self) -> None:
         self._activations_cov.reset()

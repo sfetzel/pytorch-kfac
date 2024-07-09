@@ -30,6 +30,7 @@ def plot_training(epoch_count, runs, training_fun, parameter_groups: list, capti
     epochs = range(1, epoch_count + 1)
     fontsize = 25
     fig, ax1 = pyplot.subplots(figsize=(15, 10))
+
     ax2 = ax1.twinx()
     set_fontsize(ax1, fontsize)
     set_fontsize(ax2, fontsize)
@@ -86,8 +87,8 @@ def plot_training(epoch_count, runs, training_fun, parameter_groups: list, capti
         losses_van_sd = std(losses_van, dim=0)
 
         linestyle = linestyles[index]
-        ax1.plot(epochs, losses_van_mean, linestyle, color='blue', label=f"Loss ({caption})")
-        ax1.fill_between(epochs, (losses_van_mean - losses_van_sd), (losses_van_mean + losses_van_sd), color='blue', alpha=0.1)
+        ax1.plot(epochs, losses_van_mean, linestyle, color='#0065a7', label=f"Loss ({caption})")
+        ax1.fill_between(epochs, (losses_van_mean - losses_van_sd), (losses_van_mean + losses_van_sd), color='#0065a7', alpha=0.1)
         ax1.set_xlabel("epoch")
         ax1.set_ylabel("Loss")
 
@@ -97,20 +98,19 @@ def plot_training(epoch_count, runs, training_fun, parameter_groups: list, capti
         val_accuracies_van_sd = std(val_accuracies_van, dim=0)
         test_accuracies_van_sd = std(test_accuracies_van, dim=0)
         train_accuracies_van_sd = std(train_accuracies_van, dim=0)
-        ax2.plot(epochs, val_accuracies_van_mean, linestyle, label=f"Validation ({caption})", color='orange')
+        ax2.plot(epochs, val_accuracies_van_mean, linestyle, label=f"Validation ({caption})", color='#66a3ca')
         ax2.fill_between(epochs, (val_accuracies_van_mean - val_accuracies_van_sd),
-                         (val_accuracies_van_mean + val_accuracies_van_sd), color='orange', alpha=0.1)
+                         (val_accuracies_van_mean + val_accuracies_van_sd), color='#66a3ca', alpha=0.1)
 
-        ax2.plot(epochs, test_accuracies_van_mean, linestyle, label=f"Test ({caption})", color='green')
+        ax2.plot(epochs, test_accuracies_van_mean, linestyle, label=f"Test ({caption})", color='#dda01d')
         ax2.fill_between(epochs, (test_accuracies_van_mean - test_accuracies_van_sd),
-                         (test_accuracies_van_mean + test_accuracies_van_sd), color='green', alpha=0.1)
-        ax2.plot(epochs, train_accuracies_van_mean, linestyle, label=f"Training ({caption})", color='red')
+                         (test_accuracies_van_mean + test_accuracies_van_sd), color='#dda01d', alpha=0.1)
+        ax2.plot(epochs, train_accuracies_van_mean, linestyle, label=f"Training ({caption})", color='#a2acbd')
         ax2.fill_between(epochs, (train_accuracies_van_mean - train_accuracies_van_sd),
-                         (train_accuracies_van_mean + train_accuracies_van_sd), color='red', alpha=0.1)
+                         (train_accuracies_van_mean + train_accuracies_van_sd), color='#a2acbd', alpha=0.1)
 
     ax2.set_ylabel("%")
     ax2.set_ylim(0, 105)
-    ax2.grid()
     ax1.grid()
     ax1.set_ylim(0.0, 2.0)
     fig.legend(fontsize=fontsize, loc='lower right')

@@ -45,7 +45,7 @@ def print_sparsity_ratio(grad: Tensor, caption):
 
 class GAT(torch.nn.Module):
     def __init__(self, in_channels, hidden_channels, out_channels, heads, dropout,
-                 hidden_layers=1, use_heads_last_channel=False):
+                 hidden_layers=1):
         super().__init__()
         self.convs = ModuleList()
         for _ in range(hidden_layers):
@@ -53,8 +53,9 @@ class GAT(torch.nn.Module):
             in_channels = hidden_channels * heads
 
         # On the Pubmed dataset, use `heads` output heads in `conv2`.
-        self.conv_last = GATConv(in_channels, out_channels, heads=heads if use_heads_last_channel else 1,
+        self.conv_last = GATConv(in_channels, out_channels, heads=1,
                                  concat=False, dropout=dropout)
+        self.batch_norm = BatchNorm(hidden_channels * heads)
         self.dropout = dropout
 
     def reset_parameters(self):
@@ -102,7 +103,6 @@ class CLS(Module):
 
     def forward(self, x, edge_index, mask=None):
         x = self.conv(x, edge_index)
-        x = F.log_softmax(x, dim=1)
         return x
 
 
@@ -205,21 +205,25 @@ def train_model(dataset, args: argparse.Namespace, device):
     """
     data = dataset[0].to(device)
     enable_kfac = args.enable_kfac
+    weight_decay = args.weight_decay
     if args.model == "GCN":
         model = GCN(dataset, hidden_layers=args.hidden_layers,
                     hidden_dim=args.hidden_channels, dropout=args.dropout)
+        parameters = [dict(params=model.crds.parameters(), weight_decay=weight_decay),
+                      dict(params=model.cls.parameters(), weight_decay=0)]
     elif args.model == "GAT":
         model = GAT(dataset.num_features, args.hidden_channels,
                     dataset.num_classes, args.heads, args.dropout,
                     args.hidden_layers, use_heads_last_channel=args.dataset == "PubMed")
+        parameters = [dict(params=model.convs.parameters(), weight_decay=weight_decay),
+                      dict(params=model.conv_last.paramterers(), weight_decay=0)]
     lr = args.lr
 
-    weight_decay = args.weight_decay
     kfac_lr = args.kfac_lr
 
     model.to(device).reset_parameters()
     optimizer_lr = kfac_lr if enable_kfac else lr
-    optimizer = Adam(model.parameters(), lr=optimizer_lr, weight_decay=weight_decay)
+    optimizer = Adam(parameters, lr=optimizer_lr, weight_decay=weight_decay)
     #optimizer = SGD(model.parameters(), lr=lr, weight_decay=weight_decay)
 
     preconditioner = None
@@ -228,7 +232,6 @@ def train_model(dataset, args: argparse.Namespace, device):
         # damping corresponds to eps in PSGD.
         # cov_ema_decay corresponds to 1-alpha in PSGD.
         # PSGD does not implement momentum.
-        # (Bias, BiasFisherBlock)
         factory = FisherBlockFactory([(nn.Linear, LinearBlock)])
         #factory = None
         preconditioner = KFAC(model, 0.0, args.kfac_damping, momentum=0.0, damping_adaptation_decay=0.99,
