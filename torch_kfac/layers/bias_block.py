@@ -18,12 +18,12 @@ class BiasFisherBlock(ExtensionFisherBlock):
             device=module.bias.device,
             **kwargs)
 
-        self._activations = None
         self._sensitivities = None
         self._center = False
-        #self._activations_cov.value = eye(module.out_features)
-        #self._activations_cov.add_to_average(1.0, 0.0)
-        #self._activations = tensor([[1.0]])
+        # The actual input for the bias layer consists of one
+        # feature for each sample, which is always 1.
+        # Therefore the activations covariance matrix is the identity.
+        self._activations_cov.add_to_average(1.0)
 
     @torch.no_grad()
     def forward_hook(self, module: Linear, input_data: torch.Tensor, output_data: torch.Tensor) -> None:
@@ -34,11 +34,6 @@ class BiasFisherBlock(ExtensionFisherBlock):
             input_data: the input data of the layer.
             output_data: the output data of the layer.
         """
-        x = input_data[0].detach().clone().reshape(-1, self._in_features - self.has_bias).requires_grad_(False)
-        if self._activations is None:
-            self._activations = x
-        else:
-            self._activations = torch.cat([self._activations, x])
 
     @torch.no_grad()
     def backward_hook(self, module: Linear, grad_inp: torch.Tensor, grad_out: torch.Tensor) -> None:
@@ -53,21 +48,14 @@ class BiasFisherBlock(ExtensionFisherBlock):
         self._center = center
 
     def update_cov(self, cov_ema_decay: float = 1.0) -> None:
-        if self._activations is None or self._sensitivities is None:
+        if self._sensitivities is None:
             return
-        act, sen = self._activations, self._sensitivities
+        sen = self._sensitivities
         if self._center:
-            act = center(act)
             sen = center(sen)
 
-        if self.has_bias:
-            act = append_homog(act)
-
-        activation_cov = compute_cov(act)
         sensitivity_cov = compute_cov(sen)
-        self._activations_cov.add_to_average(activation_cov, cov_ema_decay)
         self._sensitivities_cov.add_to_average(sensitivity_cov, cov_ema_decay)
-        self._activations = None
         self._sensitivities = None
 
     def grads_to_mat(self, grads: Iterable[torch.Tensor]) -> torch.Tensor:
