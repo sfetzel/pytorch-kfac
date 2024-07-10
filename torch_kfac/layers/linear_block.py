@@ -7,11 +7,15 @@ from ..utils import center, compute_cov, append_homog
 
 
 class FullyConnectedFisherBlock(ExtensionFisherBlock):
-    def __init__(self, module: Linear, **kwargs) -> None:
+    def __init__(self, module: Linear, in_features=None, out_features=None, **kwargs) -> None:
+        if in_features is None:
+            in_features = module.in_features
+        if out_features is None:
+            out_features = module.out_features
         super().__init__(
             module=module,
-            in_features=module.in_features + int(module.bias is not None),
-            out_features=module.out_features,
+            in_features=in_features + int(module.bias is not None),
+            out_features=out_features,
             dtype=module.weight.dtype,
             device=module.weight.device,
             **kwargs)

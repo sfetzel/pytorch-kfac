@@ -23,7 +23,8 @@ def set_fontsize(ax, font_size: float):
         item.set_fontsize(font_size)
 
 
-def plot_training(epoch_count, runs, training_fun, parameter_groups: list, captions: list):
+def plot_training(epoch_count, runs, training_fun, parameter_groups: list, captions: list,
+                  loss_range=None, legend_loc='lower right'):
     times = []
     best_val_acc = final_test_acc = 0
     best_loss = 0
@@ -112,7 +113,8 @@ def plot_training(epoch_count, runs, training_fun, parameter_groups: list, capti
     ax2.set_ylabel("%")
     ax2.set_ylim(0, 105)
     ax1.grid()
-    ax1.set_ylim(0.0, 2.0)
-    fig.legend(fontsize=fontsize, loc='lower right')
+    if loss_range is not None:
+        ax1.set_ylim(loss_range[0], loss_range[1])
+    fig.legend(fontsize=fontsize, loc=legend_loc)
 
     return ax1, ax2, fig, group_results

@@ -14,14 +14,14 @@ import torch_geometric.transforms as T
 import torch.nn.functional as F
 from tqdm.auto import tqdm
 
-from examples.linear_block import LinearBlock
+from examples.filter_blocks import FilterBlocksFactory
 from plot_utils import plot_training, find_filename
 from gat_conv import GATConv
 import json
 
 from gcn_conv import GCNConv
 from torch_kfac import KFAC
-from torch_kfac.layers import FullyConnectedFisherBlock, Bias, BiasFisherBlock
+from torch_kfac.layers import FullyConnectedFisherBlock, Bias, BiasFisherBlock, Identity
 from hessianfree.optimizer import HessianFree
 
 from torch_kfac.layers.fisher_block_factory import FisherBlockFactory
@@ -45,7 +45,7 @@ def print_sparsity_ratio(grad: Tensor, caption):
 
 class GAT(torch.nn.Module):
     def __init__(self, in_channels, hidden_channels, out_channels, heads, dropout,
-                 hidden_layers=1):
+                 hidden_layers=1, use_heads_last_channel=False):
         super().__init__()
         self.convs = ModuleList()
         for _ in range(hidden_layers):
@@ -53,7 +53,7 @@ class GAT(torch.nn.Module):
             in_channels = hidden_channels * heads
 
         # On the Pubmed dataset, use `heads` output heads in `conv2`.
-        self.conv_last = GATConv(in_channels, out_channels, heads=1,
+        self.conv_last = self.conv_last = GATConv(in_channels, out_channels, heads=heads if use_heads_last_channel else 1,
                                  concat=False, dropout=dropout)
         self.batch_norm = BatchNorm(hidden_channels * heads)
         self.dropout = dropout
@@ -216,7 +216,7 @@ def train_model(dataset, args: argparse.Namespace, device):
                     dataset.num_classes, args.heads, args.dropout,
                     args.hidden_layers, use_heads_last_channel=args.dataset == "PubMed")
         parameters = [dict(params=model.convs.parameters(), weight_decay=weight_decay),
-                      dict(params=model.conv_last.paramterers(), weight_decay=0)]
+                      dict(params=model.conv_last.parameters(), weight_decay=0)]
     lr = args.lr
 
     kfac_lr = args.kfac_lr
@@ -232,17 +232,16 @@ def train_model(dataset, args: argparse.Namespace, device):
         # damping corresponds to eps in PSGD.
         # cov_ema_decay corresponds to 1-alpha in PSGD.
         # PSGD does not implement momentum.
-        factory = FisherBlockFactory([(nn.Linear, LinearBlock)])
         #factory = None
         preconditioner = KFAC(model, 0.0, args.kfac_damping, momentum=0.0, damping_adaptation_decay=0.99,
                               cov_ema_decay=args.cov_ema_decay, enable_pi_correction=True, adapt_damping=True,
                               damping_adaptation_interval=5, update_cov_manually=True,
-                              block_factory=factory)
+                              block_factory=FilterBlocksFactory)
         for block in preconditioner.blocks:
-            if isinstance(block, LinearBlock):
+            if not isinstance(block, Identity):
                 block.train_mask = data["train_mask"]
 
-        linear_blocks = sum(1 for block in preconditioner.blocks if isinstance(block, LinearBlock))
+        linear_blocks = sum(1 for block in preconditioner.blocks if not isinstance(block, Identity))
         print(f"Preconditioning active on {linear_blocks} blocks.")
     elif args.baseline in ["hessian", "ggn"] and not enable_kfac:
         preconditioner = HessianFree(model.parameters(), verbose=False, curvature_opt=args.baseline, cg_max_iter=1000,
@@ -329,7 +328,7 @@ if __name__ == "__main__":
 
     _, _, fig, group_results = plot_training(args.epochs, args.runs, plot_training_train_model, [
         {"kfac": False}, {"kfac": True},
-    ], [args.baseline, "KFAC"])
+    ], [args.baseline, "KFAC"], loss_range=(0,2))
 
     fig.suptitle(f"{args.model} Training on {args.dataset}", fontsize=28)
     filename = args.file_name

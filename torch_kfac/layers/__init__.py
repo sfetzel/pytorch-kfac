@@ -5,3 +5,5 @@ from .identity import Identity
 from .conv_block import ConvFisherBlock
 from .bias_layer import Bias
 from .bias_block import BiasFisherBlock
+from .fisher_block_factory import FisherBlockFactory
+from .pyg_linear import PyGLinearBlock

@@ -58,6 +58,39 @@ class BiasFisherBlock(ExtensionFisherBlock):
         self._sensitivities_cov.add_to_average(sensitivity_cov, cov_ema_decay)
         self._sensitivities = None
 
+    def multiply_preconditioner(self, grads: Iterable[torch.Tensor], damping: torch.Tensor) -> Iterable[torch.Tensor]:
+        """
+        Multiplies the gradients with the preconditioning matrix, which corresponds to
+        calculating S^{1} * g * A^{-1}, where S is the sensitivities covariance matrix
+        and A is the activations covariance matrix.
+        Args:
+            grads: An iterable of the gradients for this block.
+            damping: The damping (Tikhonov regularization) to apply before calculating the inverse.
+            update_inverses: If true the inverse of the covariance matrices are recalculated.
+                If False, the cached inverse covariance matrices are used.
+                If the inverse covariance matrices are None, then they are always calculated.
+        Returns:
+            The preconditioned gradients.
+        """
+        if self._activations_cov_inv is None or self._sensitivities_cov_inv is None:
+            self.update_cov_inv(damping)
+
+        mat_grads = self.grads_to_mat(grads)
+        nat_grads = self._sensitivities_cov_inv @ mat_grads / self.renorm_coeff
+
+        return self.mat_to_grads(nat_grads)
+
+    def multiply(self, grads: Iterable[torch.Tensor], damping: torch.Tensor) -> Iterable[torch.Tensor]:
+        act_cov, sen_cov = self.activation_covariance, self.sensitivity_covariance
+        a_damp, s_damp = self.compute_damping(damping, self.renorm_coeff)
+        act_cov += torch.eye(act_cov.shape[0], device=a_damp.device) * a_damp
+        sen_cov += torch.eye(sen_cov.shape[0], device=s_damp.device) * s_damp
+
+        mat_grads = self.grads_to_mat(grads)
+        nat_grads = sen_cov @ mat_grads * act_cov / self.renorm_coeff
+
+        return self.mat_to_grads(nat_grads)
+
     def grads_to_mat(self, grads: Iterable[torch.Tensor]) -> torch.Tensor:
         mat_grads = grads[0]
         return mat_grads
