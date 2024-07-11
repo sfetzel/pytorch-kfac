@@ -48,17 +48,8 @@ for baseline in adam hessian ggn; do
 done
 
 dataset=Cora
-for damping in 0.1 0.001 0.0001; do
-  python planetoid.py --cov_update_freq=1 --model=GCN --dropout=0.5 --weight_decay=5e-4\
-    --hidden_channels=64 --kfac_damping=$damping --lr=0.01 --cov_ema_decay=0.0 \
-    --baseline=adam --dataset=$dataset --runs=10 --file_name=results/GCN-$dataset-damping-$damping
-done
-
-for cov_ema_decay in "0.0" "0.25" "0.5" "0.85"; do
-  python planetoid.py --cov_update_freq=1 --model=GCN --dropout=0.5 --weight_decay=5e-4\
-    --hidden_channels=64 --kfac_damping=0.01 --lr=0.01 --cov_ema_decay=$cov_ema_decay \
-    --baseline=adam --dataset=$dataset --runs=10 --file_name=results/GCN-$dataset-cov-decay-$cov_ema_decay
-done
+python kfac_hyperparams.py --model=GCN --dataset=$dataset --experiment=damping --runs=100 --file_name=results/GCN-Cora-damping
+python kfac_hyperparams.py --model=GCN --dataset=$dataset --experiment=decay --runs=100 --file_name=results/GCN-Cora-decay
 
 python ogbn_arxiv.py --device=1 --model=GCN --runs=100 --file_name=results/GCN-ogbn-arxiv
 # not enough memory?
