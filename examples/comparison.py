@@ -25,10 +25,9 @@ from torch_geometric.loader import DataLoader
 
 from examples.gat import GAT
 from examples.gat_conv import GATConv
-from examples.linear_block import LinearBlock
 from gin import GIN
 from torch_kfac import KFAC
-from torch_kfac.layers import FullyConnectedFisherBlock
+from torch_kfac.layers import FullyConnectedFisherBlock, PyGLinearBlock
 from torch_kfac.layers.fisher_block_factory import FisherBlockFactory
 
 
