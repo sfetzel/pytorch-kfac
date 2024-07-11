@@ -76,7 +76,7 @@ class BiasFisherBlock(ExtensionFisherBlock):
             self.update_cov_inv(damping)
 
         mat_grads = self.grads_to_mat(grads)
-        nat_grads = self._sensitivities_cov_inv @ mat_grads * self._activations_cov_inv / self.renorm_coeff
+        nat_grads = self._sensitivities_cov_inv @ (mat_grads * self._activations_cov_inv) / self.renorm_coeff
 
         return self.mat_to_grads(nat_grads)
 
@@ -92,11 +92,11 @@ class BiasFisherBlock(ExtensionFisherBlock):
         return self.mat_to_grads(nat_grads)
 
     def grads_to_mat(self, grads: Iterable[torch.Tensor]) -> torch.Tensor:
-        mat_grads = grads[0]
+        mat_grads = grads[0].reshape(-1, 1)
         return mat_grads
 
     def mat_to_grads(self, mat_grads: torch.Tensor) -> torch.Tensor:
-        return mat_grads,
+        return mat_grads.reshape(-1),
 
     @property
     def has_bias(self) -> bool:
