@@ -8,7 +8,7 @@ import torch.nn.functional as F
 import torch_geometric.nn.dense
 
 import torch_geometric.transforms as T
-from torch_geometric.nn import SAGEConv, #GATConv #, GCNConv
+from torch_geometric.nn import SAGEConv
 from torch_geometric.nn.dense import Linear
 from torch_sparse import SparseTensor
 from torch import Tensor
