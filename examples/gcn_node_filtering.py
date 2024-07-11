@@ -5,7 +5,7 @@ from pandas import DataFrame
 from torch import Tensor, no_grad
 from torch.nn import Linear
 
-from examples.linear_block import LinearBlock
+from examples.filter_blocks import TorchLinearBlockFilter
 from planetoid import GCN
 import torch
 import torch.nn.functional as F
@@ -68,7 +68,7 @@ parser.add_argument('--epochs', type=int, default=200)
 parser.add_argument('--use_gdc', action='store_true', help='Use GDC')
 parser.add_argument('--kfac_damping', type=float, default=0.1)
 parser.add_argument('--cov_ema_decay', type=float, default=0.0)
-parser.add_argument('--runs', type=int, default=10)
+parser.add_argument('--runs', type=int, default=20)
 args = parser.parse_args()
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -84,7 +84,7 @@ def init_training():
         dict(params=model.cls.parameters(), weight_decay=0)
     ], lr=args.lr)  # Only perform weight-decay on first convolution.
 
-    factory = FisherBlockFactory([(nn.Linear, LinearBlock)])
+    factory = FisherBlockFactory([(nn.Linear, TorchLinearBlockFilter)])
     preconditioner = KFAC(model, 0.0, args.kfac_damping, momentum=0.0, damping_adaptation_decay=0.99,
                           cov_ema_decay=args.cov_ema_decay, enable_pi_correction=True, adapt_damping=True,
                           damping_adaptation_interval=5,
@@ -125,7 +125,7 @@ for add_nodes in [0, 400, 800, 1600, 2000, 2400]:
     for _ in range(args.runs):
         model, optimizer, preconditioner = init_training()
         for block in preconditioner.blocks:
-            if isinstance(block, LinearBlock):
+            if isinstance(block, TorchLinearBlockFilter):
                 new_mask = data["train_mask"].clone()
                 unselected_nodes = torch.arange(0, len(new_mask))[~new_mask.to("cpu")]
                 random_nodes = sample(unselected_nodes.tolist(), add_nodes)
@@ -153,5 +153,5 @@ for add_nodes in [0, 400, 800, 1600, 2000, 2400]:
                     torch.mean(torch.tensor(losses)).item(), torch.std(torch.tensor(losses)).item()])
 
 df = DataFrame(results, columns=["add_nodes", "best_test_acc_mean", "best_test_acc_std", "best_loss_mean", "best_loss_std"])
-df.to_csv(osp.join(osp.dirname(osp.realpath(__file__)), "node_filter.csv"), index=False)
+df.to_csv(osp.join(osp.dirname(osp.realpath(__file__)), "node-filter.csv"), index=False)
 print(df)
