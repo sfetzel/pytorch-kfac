@@ -37,9 +37,11 @@ class BiasBlockTest(unittest.TestCase):
         bias_block._enable_pi_correction = False
         bias_block._sensitivities = sensitivities
         bias_block.update_cov(0.0)
-        (p_bias_block,) = bias_block.multiply_preconditioner([linear_module.bias.reshape(8, 1)], damping)
+        in_grad = linear_module.bias
+        (p_bias_block,) = bias_block.multiply_preconditioner([in_grad], damping)
 
         assert_close(p_bias_block.reshape(-1), p_bias)
+        self.assertEqual(p_bias_block.shape, in_grad.shape)
 
     def test_get_fisher_block(self):
         bias_module = Bias(8, 5)
