@@ -149,9 +149,12 @@ for add_nodes in [0, 400, 800, 1600, 2000, 2400]:
         print(f'Median time per epoch: {torch.tensor(times).median():.4f}s')
         test_accs.append(test_acc)
         losses.append(best_loss)
-    results.append([add_nodes, torch.mean(torch.tensor(test_accs)).item(), torch.std(torch.tensor(test_accs)).item(),
-                    torch.mean(torch.tensor(losses)).item(), torch.std(torch.tensor(losses)).item()])
+    results.append([add_nodes,
+                    round(torch.mean(torch.tensor(test_accs)).item(), 3),
+                    round(torch.std(torch.tensor(test_accs)).item(), 3),
+                    round(torch.mean(torch.tensor(losses)).item(), 3),
+                    round(torch.std(torch.tensor(losses)).item(), 3)])
 
 df = DataFrame(results, columns=["add_nodes", "best_test_acc_mean", "best_test_acc_std", "best_loss_mean", "best_loss_std"])
-df.to_csv(osp.join(osp.dirname(osp.realpath(__file__)), "node-filter.csv"), index=False)
+df.to_csv(osp.join(osp.dirname(osp.realpath(__file__)), f"node-filter-{args.dataset}.csv"), index=False)
 print(df)

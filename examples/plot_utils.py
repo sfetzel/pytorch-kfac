@@ -36,7 +36,7 @@ def plot_training(epoch_count, runs, training_fun, parameter_groups: list, capti
     set_fontsize(ax1, fontsize)
     set_fontsize(ax2, fontsize)
 
-    linestyles = ["-", "--"]
+    linestyles = ["-", "--", "-."]
     group_results = {}
     for index, (parameter_group, caption) in enumerate(zip(parameter_groups, captions)):
         losses_van, val_accuracies_van, test_accuracies_van, train_accuracies_van = [], [], [], []
