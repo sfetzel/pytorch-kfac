@@ -76,7 +76,7 @@ class BiasFisherBlock(ExtensionFisherBlock):
             self.update_cov_inv(damping)
 
         mat_grads = self.grads_to_mat(grads)
-        nat_grads = self._sensitivities_cov_inv @ mat_grads / self.renorm_coeff
+        nat_grads = self._sensitivities_cov_inv @ mat_grads * self._activations_cov_inv / self.renorm_coeff
 
         return self.mat_to_grads(nat_grads)
 
