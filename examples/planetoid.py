@@ -247,7 +247,7 @@ def train_model(dataset, args: argparse.Namespace, device):
         print(f"Preconditioning active on {linear_blocks} blocks.")
     elif args.baseline in ["hessian", "ggn"] and not enable_kfac:
         preconditioner = HessianFree(model.parameters(), verbose=False, curvature_opt=args.baseline, cg_max_iter=1000,
-                                lr=0.0, damping=args.hessianfree_damping, adapt_damping=False)
+                                lr=0.0, damping=args.hessianfree_damping, adapt_damping=args.baseline == "hessian")
 
     if preconditioner is not None:
         print(f"Preconditioner: {preconditioner.__class__}")
