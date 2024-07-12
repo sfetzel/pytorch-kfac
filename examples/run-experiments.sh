@@ -42,9 +42,9 @@ python gridsearch.py --epochs=200 --model=GCN --hidden_channels=64 --dataset=Cit
 
 
 RUNS=10
-
-for baseline in adam hessian ggn; do
-  python planetoid.py --model=GCN --dropout=0.6 --kfac_damping=0.1 --lr=0.01 --cov_ema_decay=0.0 --baseline=$baseline --dataset=Cora --runs=$RUNS
+for model in GCN GAT; do
+  python planetoid.py --model=$model --baseline=hessian --hessianfree_damping=1.0 --dataset=$dataset --runs=$RUNS --file_name=results/$model-$dataset-hessian
+  python planetoid.py --model=$model --baseline=ggn --dataset=$dataset --runs=$RUNS --file_name=results/$model-$dataset-ggn
 done
 
 dataset=Cora
