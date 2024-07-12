@@ -144,37 +144,36 @@ def train(model, optimizer, data, preconditioner, update_cov):
     model.train()
     optimizer.zero_grad()
 
-    if isinstance(optimizer, HessianFree):
-        optimizer.step(lambda: model_forward(model), test_deterministic=True)
-    else:
-        loss = None
-        if isinstance(preconditioner, KFAC):
-            with preconditioner.track_forward():
-                out = model(data)
-                label = out.max(1)[1]
-                label[data.train_mask] = data.y[data.train_mask]
-                label.requires_grad = False
-
-                loss = F.cross_entropy(out[data.train_mask], label[data.train_mask], reduction="mean")
-            with preconditioner.track_backward():
-                loss.backward(retain_graph=True)
-
-            if update_cov:
-                preconditioner.update_cov()
-                """for block in preconditioner.blocks:
-                    if isinstance(block, FullyConnectedFisherBlock):
-                        print_sparsity_ratio(block.sensitivity_covariance, "Sensitivities cov")
-                        print_sparsity_ratio(block.activation_covariance, "act cov")"""
-
-            preconditioner.step(loss)
-        else:
+    loss = None
+    if isinstance(preconditioner, KFAC):
+        with preconditioner.track_forward():
             out = model(data)
             label = out.max(1)[1]
             label[data.train_mask] = data.y[data.train_mask]
+            label.requires_grad = False
 
             loss = F.cross_entropy(out[data.train_mask], label[data.train_mask], reduction="mean")
+        with preconditioner.track_backward():
             loss.backward(retain_graph=True)
-        optimizer.step()
+
+        if update_cov:
+            preconditioner.update_cov()
+            """for block in preconditioner.blocks:
+                if isinstance(block, FullyConnectedFisherBlock):
+                    print_sparsity_ratio(block.sensitivity_covariance, "Sensitivities cov")
+                    print_sparsity_ratio(block.activation_covariance, "act cov")"""
+
+        preconditioner.step(loss)
+    else:
+        if isinstance(preconditioner, HessianFree):
+            preconditioner.step(lambda: model_forward(model), test_deterministic=True)
+        out = model(data)
+        label = out.max(1)[1]
+        label[data.train_mask] = data.y[data.train_mask]
+
+        loss = F.cross_entropy(out[data.train_mask], label[data.train_mask], reduction="mean")
+        loss.backward(retain_graph=True)
+    optimizer.step()
 
 
 def evaluate(model, data):
