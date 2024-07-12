@@ -166,7 +166,9 @@ def train(model, optimizer, data, preconditioner, update_cov):
         preconditioner.step(loss)
     else:
         if isinstance(preconditioner, HessianFree):
+            model.eval() # need to set to eval mode otherwise model is not deterministic.
             preconditioner.step(lambda: model_forward(model), test_deterministic=True)
+            model.train()
         out = model(data)
         label = out.max(1)[1]
         label[data.train_mask] = data.y[data.train_mask]
