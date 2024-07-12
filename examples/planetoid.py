@@ -135,6 +135,7 @@ class GCN(Module):
 # https://github.com/russellizadi/ssp/blob/master/experiments/train_eval.py.
 
 def model_forward(model):
+    model.eval()
     out = model(data)
     #loss = F.nll_loss(out[data.train_mask], data.y[data.train_mask])
     loss = F.cross_entropy(out[data.train_mask], data.y[data.train_mask], reduction="mean")
@@ -165,16 +166,16 @@ def train(model, optimizer, data, preconditioner, update_cov):
 
         preconditioner.step(loss)
     else:
-        if isinstance(preconditioner, HessianFree):
-            model.eval() # need to set to eval mode otherwise model is not deterministic.
-            preconditioner.step(lambda: model_forward(model), test_deterministic=True)
-            model.train()
         out = model(data)
         label = out.max(1)[1]
         label[data.train_mask] = data.y[data.train_mask]
 
         loss = F.cross_entropy(out[data.train_mask], label[data.train_mask], reduction="mean")
         loss.backward(retain_graph=True)
+        if isinstance(preconditioner, HessianFree):
+            model.eval() # need to set to eval mode otherwise model is not deterministic.
+            preconditioner.step(lambda: model_forward(model), test_deterministic=True)
+            model.train()
     optimizer.step()
 
 
@@ -246,7 +247,7 @@ def train_model(dataset, args: argparse.Namespace, device):
         print(f"Preconditioning active on {linear_blocks} blocks.")
     elif args.baseline in ["hessian", "ggn"] and not enable_kfac:
         preconditioner = HessianFree(model.parameters(), verbose=False, curvature_opt=args.baseline, cg_max_iter=1000,
-                                lr=0.0, damping=args.hessianfree_damping)
+                                lr=0.0, damping=args.hessianfree_damping, adapt_damping=False)
 
     if preconditioner is not None:
         print(f"Preconditioner: {preconditioner.__class__}")
