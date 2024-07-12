@@ -42,15 +42,17 @@ python gridsearch.py --epochs=200 --model=GCN --hidden_channels=64 --dataset=Cit
 
 
 RUNS=10
-for model in GCN GAT; do
-  python planetoid.py --model=$model --baseline=hessian --hessianfree_damping=1.0 --dataset=$dataset --runs=$RUNS --file_name=results/$model-$dataset-hessian
-  python planetoid.py --model=$model --baseline=ggn --dataset=$dataset --runs=$RUNS --file_name=results/$model-$dataset-ggn
+for dataset in $PLANETOID_DATASETS; do
+  for model in GCN GAT; do
+    python planetoid.py --model=$model --baseline=hessian --hessianfree_damping=1.0 --dataset=$dataset --runs=$RUNS --file_name=results/$model-$dataset-hessian
+    python planetoid.py --model=$model --baseline=ggn --dataset=$dataset --runs=$RUNS --file_name=results/$model-$dataset-ggn
+  done
 done
 
-dataset=Cora
-python kfac_hyperparams.py --model=GCN --dataset=$dataset --experiment=damping --runs=100 --file_name=results/GCN-Cora-damping
-python kfac_hyperparams.py --model=GCN --dataset=$dataset --experiment=decay --runs=100 --file_name=results/GCN-Cora-decay
-
+for dataset in $PLANETOID_DATASETS; do
+  python kfac_hyperparams.py --model=GCN --dataset=$dataset --experiment=damping --runs=100 --file_name=results/GCN-$dataset-damping
+  python kfac_hyperparams.py --model=GCN --dataset=$dataset --experiment=decay --runs=100 --file_name=results/GCN-$dataset-decay
+done;
 python ogbn_arxiv.py --device=1 --model=GCN --runs=100 --file_name=results/GCN-ogbn-arxiv
 # not enough memory?
 python ogbn_arxiv.py --device=cpu --model=GAT --hidden_channels=32 --heads=8 --runs=10
