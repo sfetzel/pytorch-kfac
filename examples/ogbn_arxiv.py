@@ -229,7 +229,7 @@ if __name__ == "__main__":
     parser.add_argument('--dropout', type=float, default=0.5)
     parser.add_argument('--lr', type=float, default=0.005)
     parser.add_argument('--kfac_lr', type=float, default=None)
-    parser.add_argument('--kfac_damping', type=float, default=2e-7)
+    parser.add_argument('--kfac_damping', type=float, default=0.1)
     parser.add_argument('--epochs', type=int, default=500)
     parser.add_argument('--runs', type=int, default=100)
     parser.add_argument('--cov_ema_decay', type=float, default=0.0)
