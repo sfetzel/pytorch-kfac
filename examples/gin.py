@@ -33,7 +33,7 @@ class GIN(torch.nn.Module):
                              ReLU(),
                              Dropout(p=dropout),
                              Linear(hidden_channels, hidden_channels))
-            self.convs.append(GINConv(nn=mlp, train_eps=True))
+            self.convs.append(GINConv(nn=mlp, train_eps=False))
             in_channels = hidden_channels
 
         # original:
