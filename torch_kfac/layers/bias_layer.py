@@ -1,5 +1,6 @@
 from typing import Optional
 
+import torch
 from torch import Tensor, empty
 from math import sqrt
 from torch.nn import Module, Parameter
@@ -15,7 +16,9 @@ class Bias(Module):
         self.bias = Parameter(empty(out_features, **factory_kwargs))
         self.out_features = out_features
         self.in_features = in_features
+        self.reset_parameters()
 
+    @torch.no_grad()
     def reset_parameters(self) -> None:
         # Setting a=sqrt(5) in kaiming_uniform is the same as initializing with
         # uniform(-1/sqrt(in_features), 1/sqrt(in_features)). For details, see

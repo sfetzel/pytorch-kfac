@@ -53,10 +53,12 @@ def plot_training(epoch_count, runs, training_fun, parameter_groups: list, capti
         # torch-operation-counter.
         cloned_args["add_self_loops"] = False
         flops_per_epoch = None
-        with OperationsCounterMode() as counter:
-            training_fun(cloned_args)
-            flops_per_epoch = counter.total_operations
-
+        try:
+            with OperationsCounterMode() as counter:
+                training_fun(cloned_args)
+                flops_per_epoch = counter.total_operations
+        except Exception as e:
+            print(f"Error when calculating FLOPs: {e}")
         best_loss, best_val_acc, best_test_acc, best_train_acc, best_epochs = [], [], [], [], []
         times = []
         for i in range(runs):
