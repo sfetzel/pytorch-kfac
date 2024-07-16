@@ -196,7 +196,9 @@ def get_model(model_str: str, args, dataset, hidden_channels, num_layers, dropou
         return GAT(in_channels=dataset.num_features,
                    hidden_channels=hidden_channels,
                    out_channels=dataset.num_classes,
-                   heads=args.heads)
+                   heads=args.heads,
+                   dropout=dropout,
+                   hidden_layers=num_layers)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
