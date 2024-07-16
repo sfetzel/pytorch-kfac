@@ -23,26 +23,12 @@ from torch_geometric.utils import degree
 from torch_geometric.datasets import TUDataset
 from torch_geometric.loader import DataLoader
 
-from examples.gat import GAT
-from examples.gat_conv import GATConv
+from examples.planetoid import GAT
 from gin import GIN
 from torch_kfac import KFAC
 from torch_kfac.layers import FullyConnectedFisherBlock, PyGLinearBlock
 from torch_kfac.layers.fisher_block_factory import FisherBlockFactory
 
-
-class GAT(Module):
-    def __init__(self, in_channels, hidden_channels, out_channels, heads, dropout):
-        super().__init__()
-        self.conv1 = GATConv(in_channels, hidden_channels, heads, dropout=dropout)
-        self.conv2 = GATConv(hidden_channels * heads, out_channels, heads=1,
-                             concat=False, dropout=dropout)
-
-    def forward(self, x, edge_index, batch):
-        x = F.elu(self.conv1(x, edge_index))
-        x = self.conv2(x, edge_index)
-        x = global_add_pool(x, batch)
-        return x
 
 class Patience:
     """

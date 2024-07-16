@@ -1,3 +1,4 @@
+import argparse
 import gc
 import time
 
@@ -6,6 +7,9 @@ from matplotlib import pyplot
 from torch import tensor, mean, std, argmax
 
 from os.path import exists, splitext
+
+from torch_operation_counter import OperationsCounterMode
+
 
 def find_filename(filename, filename_ext=None):
 
@@ -41,7 +45,19 @@ def plot_training(epoch_count, runs, training_fun, parameter_groups: list, capti
     for index, (parameter_group, caption) in enumerate(zip(parameter_groups, captions)):
         losses_van, val_accuracies_van, test_accuracies_van, train_accuracies_van = [], [], [], []
 
-        best_loss, best_val_acc, best_test_acc, best_train_acc = [], [], [], []
+        cloned_args = parameter_group.copy()
+        # only use one epoch to determine the FLOPs.
+        cloned_args["epochs"] = 1
+        # need to disable add_self_loops as this will use
+        # a custom tensor type which is not supported by
+        # torch-operation-counter.
+        cloned_args["add_self_loops"] = False
+        flops_per_epoch = None
+        with OperationsCounterMode() as counter:
+            training_fun(cloned_args)
+            flops_per_epoch = counter.total_operations
+
+        best_loss, best_val_acc, best_test_acc, best_train_acc, best_epochs = [], [], [], [], []
         times = []
         for i in range(runs):
             start_time = time.perf_counter()
@@ -60,10 +76,12 @@ def plot_training(epoch_count, runs, training_fun, parameter_groups: list, capti
             best_val_acc.append(val_accuracies[best_epoch])
             best_test_acc.append(test_accuracies[best_epoch])
             best_train_acc.append(train_accuracies[best_epoch])
+            best_epochs.append(best_epoch)
         best_loss = tensor(best_loss)
         best_val_acc = tensor(best_val_acc)
         best_test_acc = tensor(best_test_acc)
         best_train_acc = tensor(best_train_acc)
+        best_epochs = tensor(best_epochs, dtype=torch.float)
         times_tensor = tensor(times)
         group_results[caption] = {
             "best_loss_mean": mean(best_loss).item(),
@@ -76,6 +94,9 @@ def plot_training(epoch_count, runs, training_fun, parameter_groups: list, capti
             "best_train_acc_std": std(best_train_acc).item(),
             "train_time_mean": mean(times_tensor).item(),
             "train_time_std": std(times_tensor).item(),
+            "best_epoch_mean": mean(best_epochs).item(),
+            "best_epoch_std": std(best_epochs).item(),
+            "flops_per_epoch": flops_per_epoch
         }
 
         # rows are training runs, columns are epochs.

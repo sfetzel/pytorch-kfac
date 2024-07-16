@@ -341,13 +341,10 @@ def train_model(args, device):
 
 if __name__ == "__main__":
     def plot_training_train_model(params):
-        merged_args = {**vars(args), "enable_kfac": params["kfac"]}
-        args_copy = argparse.Namespace(**merged_args)
-        return train_model(args_copy, device)
-
+        return train_model(argparse.Namespace(**params), device)
 
     _, _, fig, group_results = plot_training(args.epochs, args.runs, plot_training_train_model, [
-        {"kfac": False}, {"kfac": True},
+        {**vars(args), "enable_kfac": False}, {**vars(args), "enable_kfac": True},
     ], [args.baseline, "KFAC"],loss_range=(0, 4.0), legend_loc='upper right')
 
     fig.suptitle(f"{args.model} Training on {dataset_name}", fontsize=28)

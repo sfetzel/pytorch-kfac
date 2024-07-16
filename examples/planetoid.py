@@ -45,16 +45,18 @@ def print_sparsity_ratio(grad: Tensor, caption):
 
 class GAT(torch.nn.Module):
     def __init__(self, in_channels, hidden_channels, out_channels, heads, dropout,
-                 hidden_layers=1, use_heads_last_channel=False):
+                 hidden_layers=1, use_heads_last_channel=False,
+                 add_self_loops=True):
         super().__init__()
         self.convs = ModuleList()
         for _ in range(hidden_layers):
-            self.convs.append(GATConv(in_channels, hidden_channels, heads, dropout=dropout))
+            self.convs.append(GATConv(in_channels, hidden_channels, heads, dropout=dropout,
+                                      add_self_loops=add_self_loops))
             in_channels = hidden_channels * heads
 
         # On the Pubmed dataset, use `heads` output heads in `conv2`.
         self.conv_last = self.conv_last = GATConv(in_channels, out_channels, heads=heads if use_heads_last_channel else 1,
-                                 concat=False, dropout=dropout)
+                                 concat=False, dropout=dropout, add_self_loops=add_self_loops)
         self.batch_norm = BatchNorm(hidden_channels * heads)
         self.dropout = dropout
 
@@ -79,9 +81,10 @@ class GAT(torch.nn.Module):
 # https://github.com/russellizadi/ssp/blob/master/experiments/gcn.py.
 
 class CRD(Module):
-    def __init__(self, d_in, d_out, p):
+    def __init__(self, d_in, d_out, p, add_self_loops=True):
         super(CRD, self).__init__()
-        self.conv = GCNConv(d_in, d_out, cached=True)
+        self.conv = GCNConv(d_in, d_out, cached=True,
+                            add_self_loops=add_self_loops)
         self.p = p
 
     def reset_parameters(self):
@@ -94,9 +97,9 @@ class CRD(Module):
 
 
 class CLS(Module):
-    def __init__(self, d_in, d_out):
+    def __init__(self, d_in, d_out, add_self_loops=True):
         super(CLS, self).__init__()
-        self.conv = GCNConv(d_in, d_out, cached=True)
+        self.conv = GCNConv(d_in, d_out, cached=True, add_self_loops=add_self_loops)
 
     def reset_parameters(self):
         self.conv.reset_parameters()
@@ -108,15 +111,15 @@ class CLS(Module):
 
 class GCN(Module):
     def __init__(self, dataset, hidden_layers: int = 1, hidden_dim: int = 16,
-                 dropout: float = 0.5):
+                 dropout: float = 0.5, add_self_loops=True):
         super(GCN, self).__init__()
         in_features = dataset.num_features
         self.crds = ModuleList()
         for i in range(hidden_layers):
-            self.crds.append(CRD(in_features, hidden_dim, dropout))
+            self.crds.append(CRD(in_features, hidden_dim, dropout, add_self_loops=add_self_loops))
             in_features = hidden_dim
 
-        self.cls = CLS(in_features, dataset.num_classes)
+        self.cls = CLS(in_features, dataset.num_classes, add_self_loops=add_self_loops)
 
     def reset_parameters(self):
         for crd in self.crds:
@@ -159,11 +162,6 @@ def train(model, optimizer, data, preconditioner, update_cov):
 
         if update_cov:
             preconditioner.update_cov()
-            """for block in preconditioner.blocks:
-                if isinstance(block, FullyConnectedFisherBlock):
-                    print_sparsity_ratio(block.sensitivity_covariance, "Sensitivities cov")
-                    print_sparsity_ratio(block.activation_covariance, "act cov")"""
-
         preconditioner.step(loss)
     else:
         out = model(data)
@@ -210,13 +208,15 @@ def train_model(dataset, args: argparse.Namespace, device):
     weight_decay = args.weight_decay
     if args.model == "GCN":
         model = GCN(dataset, hidden_layers=args.hidden_layers,
-                    hidden_dim=args.hidden_channels, dropout=args.dropout)
+                    hidden_dim=args.hidden_channels, dropout=args.dropout,
+                    add_self_loops=args.add_self_loops)
         parameters = [dict(params=model.crds.parameters(), weight_decay=weight_decay),
                       dict(params=model.cls.parameters(), weight_decay=0)]
     elif args.model == "GAT":
         model = GAT(dataset.num_features, args.hidden_channels,
                     dataset.num_classes, args.heads, args.dropout,
-                    args.hidden_layers, use_heads_last_channel=args.dataset == "PubMed")
+                    args.hidden_layers, use_heads_last_channel=args.dataset == "PubMed",
+                    add_self_loops=args.add_self_loops)
         parameters = [dict(params=model.convs.parameters(), weight_decay=weight_decay),
                       dict(params=model.conv_last.parameters(), weight_decay=0)]
     lr = args.lr
@@ -289,6 +289,7 @@ if __name__ == "__main__":
     parser.add_argument('--cov_ema_decay', type=float, default=0.0)
     parser.add_argument('--results_dir', type=str, default="results")
     parser.add_argument('--file_name', type=str, default=None)
+    parser.add_argument('--add_self_loops', type=bool, default=True)
     args = parser.parse_args()
 
     if not os.path.exists(args.results_dir):
@@ -310,7 +311,8 @@ if __name__ == "__main__":
         "hessianfree_damping": args.hessianfree_damping,
         "heads": args.heads,
         "cov_ema_decay": args.cov_ema_decay,
-        "cov_update_freq": args.cov_update_freq
+        "cov_update_freq": args.cov_update_freq,
+        "epochs": args.epochs
     }
 
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
@@ -321,15 +323,12 @@ if __name__ == "__main__":
 
     epochs = args.epochs
     gamma = None
-    runs = 1
 
-    def plot_training_train_model(params):
-        merged_args = {**vars(args), "enable_kfac": params["kfac"]}
-        args_copy = argparse.Namespace(**merged_args)
-        return train_model(dataset, args_copy, device)
+    def train_fun(params):
+        return train_model(dataset, argparse.Namespace(**params), device)
 
-    _, _, fig, group_results = plot_training(args.epochs, args.runs, plot_training_train_model, [
-        {"kfac": False}, {"kfac": True},
+    _, _, fig, group_results = plot_training(args.epochs, args.runs, train_fun, [
+        {**vars(args), "enable_kfac": False}, {**vars(args), "enable_kfac": True},
     ], [args.baseline, "KFAC"], loss_range=(0,2))
 
     fig.suptitle(f"{args.model} Training on {args.dataset}", fontsize=28)
