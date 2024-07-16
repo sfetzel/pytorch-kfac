@@ -15,7 +15,7 @@ from torch.optim import Adam
 from torch import no_grad, cuda, long, device as torch_device, random as torch_random, load, save, nn
 import torch.nn.functional as F
 from torch.optim.lr_scheduler import StepLR
-from torch.nn import Module, CrossEntropyLoss
+from torch.nn import Module, CrossEntropyLoss, ModuleList
 from torch_geometric.transforms import OneHotDegree
 from torch_geometric.nn import global_add_pool
 
@@ -23,12 +23,28 @@ from torch_geometric.utils import degree
 from torch_geometric.datasets import TUDataset
 from torch_geometric.loader import DataLoader
 
-from examples.planetoid import GAT
+from examples.gat_conv import GATConv
 from gin import GIN
 from torch_kfac import KFAC
 from torch_kfac.layers import FullyConnectedFisherBlock, PyGLinearBlock
 from torch_kfac.layers.fisher_block_factory import FisherBlockFactory
 
+class GAT(Module):
+    def __init__(self, in_channels, hidden_channels, out_channels, heads, dropout, hidden_layers):
+        super().__init__()
+        self.convs = ModuleList()
+        for _ in range(hidden_layers):
+            self.convs.append(GATConv(in_channels, hidden_channels, heads, dropout=dropout))
+            in_channels = hidden_channels * heads
+        self.conv_last = GATConv(hidden_channels * heads, out_channels, heads=1,
+                             concat=False, dropout=dropout)
+
+    def forward(self, x, edge_index, batch):
+        for conv in self.convs:
+            x = F.elu(conv(x, edge_index))
+        x = self.conv_last(x, edge_index)
+        x = global_add_pool(x, batch)
+        return x
 
 class Patience:
     """
