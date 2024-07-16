@@ -214,7 +214,7 @@ def get_model(model_str: str, args, dataset, hidden_channels, num_layers, dropou
                    out_channels=dataset.num_classes,
                    heads=args.heads,
                    dropout=dropout,
-                   hidden_layers=num_layers)
+                   hidden_layers=num_layers-1)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -227,7 +227,7 @@ if __name__ == '__main__':
 
     # if there are 4 choices for damping, more tendency towards preconditioning?
     # for proof of concept: without reporting accuracies
-    parser.add_argument("--kfac_damping", type=float, nargs="+", default=[1e-7, None])# None, 0.01, 1e-7
+    parser.add_argument("--kfac_damping", type=float, nargs="+", default=[0.1, None])# None, 0.01, 1e-7
     parser.add_argument("--weight_decay", type=float, nargs="+", default=[0.0005, 0.0])
 
     parser.add_argument("--dropout", type=int, nargs="+", default=[0.0, 0.5])
