@@ -46,5 +46,5 @@ df = DataFrame(best_results, columns=["model", "dataset", "dropout", "kfac_dampi
                                       "weight_decay", "cov_update_freq", "cov_ema_decay",
                                       "train_acc_mean", "train_acc_std", "val_acc_mean", "val_acc_std",
                                       "test_acc_mean", "test_acc_std",
-                                      "loss_mean", "loss_std"], index=None)
+                                      "loss_mean", "loss_std"], index=None).sort_values(by=["model", "dataset"])
 df.to_csv("results/gridsearch.csv", index=False)
