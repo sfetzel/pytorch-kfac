@@ -63,7 +63,7 @@ for result_filename in result_files:
         except Exception as error:
             print(f"Could not read {result_filename}: {error}")
 
-df = DataFrame(best_results, columns=["model", "dataset", "dropout", "kfac_damping", "lr",
+df = (DataFrame(best_results, columns=["model", "dataset", "dropout", "kfac_damping", "lr",
                                       "weight_decay", "cov_update_freq", "cov_ema_decay",
                                       "train_acc_mean", "train_acc_std", "val_acc_mean", "val_acc_std",
                                       "test_acc_mean", "test_acc_std",
@@ -71,5 +71,6 @@ df = DataFrame(best_results, columns=["model", "dataset", "dropout", "kfac_dampi
                                       "adam_test_acc_mean", "adam_test_acc_std",
                                       "adam_loss_mean", "adam_loss_std",
                                       "kfac_test_acc_mean", "kfac_test_acc_std",
-                                      "kfac_loss_mean", "kfac_loss_std",], index=None).sort_values(by=["model", "dataset"])
+                                      "kfac_loss_mean", "kfac_loss_std",], index=None)
+      .sort_values(by=["dataset", "model"]))
 df.to_csv("results/gridsearch.csv", index=False)
