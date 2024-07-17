@@ -10,7 +10,9 @@ for result_filename in listdir(results_dir):
         try:
             with open(filepath, "r") as result_file:
                 df = read_csv(filepath, delimiter=';')
-                model = result_filename[:3]
+                parts = result_filename.split('_')
+                model = parts[0]
+                dataset = parts[1]
                 print(f"File: {result_filename}, Best test acc config:")
                 best_test_config = df.iloc[df["test_acc_mean"].idxmax()]
                 #print(best_test_config)
@@ -19,6 +21,7 @@ for result_filename in listdir(results_dir):
                 best_val_config = df.iloc[df["val_acc_mean"].idxmax()]
                 best_results.append([
                     model,
+                    dataset,
                     best_val_config["dropout"],
                     best_val_config["kfac_damping"],
                     best_val_config["lr"],
@@ -39,7 +42,7 @@ for result_filename in listdir(results_dir):
         except Exception as error:
             print(f"Could not read {result_filename}: {error}")
 
-df = DataFrame(best_results, columns=["model", "dropout", "kfac_damping", "lr",
+df = DataFrame(best_results, columns=["model", "dataset", "dropout", "kfac_damping", "lr",
                                       "weight_decay", "cov_update_freq", "cov_ema_decay",
                                       "train_acc_mean", "train_acc_std", "val_acc_mean", "val_acc_std",
                                       "test_acc_mean", "test_acc_std",
