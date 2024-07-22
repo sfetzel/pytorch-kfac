@@ -227,7 +227,7 @@ if __name__ == '__main__':
 
     # if there are 4 choices for damping, more tendency towards preconditioning?
     # for proof of concept: without reporting accuracies
-    parser.add_argument("--kfac_damping", type=float, nargs="+", default=[0.1, None])# None, 0.01, 1e-7
+    parser.add_argument("--kfac_damping", nargs="+", default=[0.1, None])# None, 0.01, 1e-7
     parser.add_argument("--weight_decay", type=float, nargs="+", default=[0.0005, 0.0])
 
     parser.add_argument("--dropout", type=int, nargs="+", default=[0.0, 0.5])
@@ -246,6 +246,9 @@ if __name__ == '__main__':
     root = Path(__file__).resolve().parent.parent.joinpath("data")
 
     dataset = TUDataset(root=root, name=args.dataset_name)
+
+    if args.kfac_damping[0] == "None":
+        args.kfac_damping[0] = None
 
     dataset_args = {"use_node_attr": False, "transform": None}
     # Update `dataset_args` based on `dataset_name`
