@@ -3,6 +3,8 @@ import gc
 import os
 import time
 from os.path import join, dirname
+
+import matplotlib
 import torch
 from torch import Tensor, no_grad, tensor, nn
 from torch.nn import Module, Linear, ModuleList
@@ -26,6 +28,8 @@ from hessianfree.optimizer import HessianFree
 
 from torch_kfac.layers.fisher_block_factory import FisherBlockFactory
 
+font = {'size': 18}
+matplotlib.rc('font', **font)
 
 def calculate_sparsity(grad: Tensor):
     # torch.nonzero returns the indices of the entries in the tensor, which are nonzero.
@@ -245,9 +249,9 @@ def train_model(dataset, args: argparse.Namespace, device):
 
         linear_blocks = sum(1 for block in preconditioner.blocks if not isinstance(block, Identity))
         print(f"Preconditioning active on {linear_blocks} blocks.")
-    elif args.baseline in ["hessian", "ggn"] and not enable_kfac:
+    elif args.baseline in ["Hessian", "GGN"] and not enable_kfac:
         preconditioner = HessianFree(model.parameters(), verbose=False, curvature_opt=args.baseline, cg_max_iter=1000,
-                                lr=0.0, damping=args.hessianfree_damping, adapt_damping=args.baseline == "hessian")
+                                lr=0.0, damping=args.hessianfree_damping, adapt_damping=args.baseline == "Hessian")
 
     if preconditioner is not None:
         print(f"Preconditioner: {preconditioner.__class__}")
@@ -273,7 +277,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--dataset', type=str, default='Cora')
     parser.add_argument('--model', type=str, required=True, choices=["GAT", "GCN"])
-    parser.add_argument('--baseline', choices=['adam', 'hessian', 'ggn'], default='adam')
+    parser.add_argument('--baseline', choices=['ADAM', 'Hessian', 'GGN'], default='ADAM')
     parser.add_argument('--hidden_channels', type=int, default=64)
     parser.add_argument('--hidden_layers', type=int, default=1)
     parser.add_argument('--heads', type=int, default=8)
