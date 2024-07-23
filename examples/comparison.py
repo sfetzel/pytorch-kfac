@@ -247,8 +247,7 @@ if __name__ == '__main__':
 
     dataset = TUDataset(root=root, name=args.dataset_name)
 
-    if args.kfac_damping[0] == "None":
-        args.kfac_damping[0] = None
+    args.kfac_damping = [float(damping) if damping != "None" else None for damping in args.kfac_damping]
 
     dataset_args = {"use_node_attr": False, "transform": None}
     # Update `dataset_args` based on `dataset_name`
