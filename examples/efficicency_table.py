@@ -82,6 +82,6 @@ df = pandas.DataFrame(results, columns=[
     "kfac-flops-ratio",
     "kfac-efficiency",
     "kfac-gflops-best-epoch",
-], index=None)
+], index=None).sort_values(by=["dataset", "model"])
 df.to_csv(os.path.join(base_dir, "efficiency.csv"), index=False)
 df
