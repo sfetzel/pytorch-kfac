@@ -1,3 +1,5 @@
+#!/bin/bash
+PLANETOID_DATASETS="Cora CiteSeer PubMed"
 
 RUNS=10
 for dataset in $PLANETOID_DATASETS; do
