@@ -16,7 +16,6 @@ import torch_geometric.transforms as T
 import torch.nn.functional as F
 from tqdm.auto import tqdm
 
-import MFAC.optim
 from examples.filter_blocks import FilterBlocksFactory
 from plot_utils import plot_training, find_filename
 from gat_conv import GATConv
@@ -26,7 +25,7 @@ from gcn_conv import GCNConv
 from torch_kfac import KFAC
 from torch_kfac.layers import FullyConnectedFisherBlock, Bias, BiasFisherBlock, Identity
 from hessianfree.optimizer import HessianFree
-
+from typing import TYPE_CHECKING
 from torch_kfac.layers.fisher_block_factory import FisherBlockFactory
 
 font = {'size': 18}
@@ -179,8 +178,8 @@ def train(model, optimizer, data, preconditioner, update_cov):
             model.eval() # need to set to eval mode otherwise model is not deterministic.
             preconditioner.step(lambda: model_forward(model), test_deterministic=True)
             model.train()
-        if isinstance(preconditioner, MFAC.optim.MFAC):
-            preconditioner.step()
+        elif preconditioner is not None:
+                 preconditioner.step()
 
     optimizer.step()
 
@@ -254,8 +253,9 @@ def train_model(dataset, args: argparse.Namespace, device):
         linear_blocks = sum(1 for block in preconditioner.blocks if not isinstance(block, Identity))
         print(f"Preconditioning active on {linear_blocks} blocks.")
     elif args.baseline in ["Hessian", "GGN"] and not enable_kfac:
-        preconditioner = HessianFree(model.parameters(), verbose=False, curvature_opt=args.baseline, cg_max_iter=1000,
-                                lr=0.0, damping=args.hessianfree_damping, adapt_damping=args.baseline == "Hessian")
+        curvature_opt = "hessian" if args.baseline == "Hessian" else "ggn"
+        preconditioner = HessianFree(model.parameters(), verbose=False, curvature_opt=curvature_opt, cg_max_iter=1000,
+                                lr=0.0, damping=args.hessianfree_damping, adapt_damping=args.baseline != "Hessian")
     elif args.baseline == "M-FAC" and not enable_kfac:
         from MFAC.optim import MFAC
         preconditioner = MFAC(model.parameters(), lr=0.0, moddev=device, optdev=device,
