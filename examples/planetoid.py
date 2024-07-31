@@ -61,7 +61,7 @@ class GAT(torch.nn.Module):
         # On the Pubmed dataset, use `heads` output heads in `conv2`.
         self.conv_last = self.conv_last = GATConv(in_channels, out_channels, heads=heads if use_heads_last_channel else 1,
                                  concat=False, dropout=dropout, add_self_loops=add_self_loops)
-        self.batch_norm = BatchNorm(hidden_channels * heads)
+        #self.batch_norm = BatchNorm(hidden_channels * heads)
         self.dropout = dropout
 
     def reset_parameters(self):
