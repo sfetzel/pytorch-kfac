@@ -343,7 +343,7 @@ if __name__ == "__main__":
 
     _, _, fig, group_results = plot_training(args.epochs, args.runs, train_fun, [
         {**vars(args), "enable_kfac": False}, {**vars(args), "enable_kfac": True},
-    ], [args.baseline, "KFAC"], loss_range=(0,2))
+    ], [args.baseline, "K-FAC"], loss_range=(0,2))
 
     fig.suptitle(f"{args.model} Training on {args.dataset}", fontsize=28)
     filename = args.file_name
