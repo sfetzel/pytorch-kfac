@@ -220,7 +220,7 @@ def test(model, data, split_idx, evaluator):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='OGBN-Arxiv (GNN)')
     parser.add_argument('--device', type=str, default="cuda:0")
-    parser.add_argument('--baseline', type=str, choices=["adam"], default="adam")
+    parser.add_argument('--baseline', type=str, choices=["ADAM"], default="ADAM")
     parser.add_argument('--model', type=str, choices=["GCN", "SAGE", "GAT"], default="GCN")
     parser.add_argument('--log_steps', type=int, default=1)
     parser.add_argument('--use_sage', action='store_true')

@@ -30,6 +30,7 @@ if __name__ == "__main__":
     parser.add_argument('--file_name', type=str, default=None)
     parser.add_argument("--enable_kfac", type=bool, default=True)
     parser.add_argument("--add_self_loops", type=bool, default=True)
+    parser.add_argument("--cov_ema_decay", type=float, default=0.0)
     args = parser.parse_args()
 
     if args.kfac_lr is None:
