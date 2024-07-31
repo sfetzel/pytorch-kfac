@@ -24,10 +24,70 @@ from torch_geometric.datasets import TUDataset
 from torch_geometric.loader import DataLoader
 
 from examples.gat_conv import GATConv
-from gin import GIN
+#from gin import GIN
 from torch_kfac import KFAC
 from torch_kfac.layers import FullyConnectedFisherBlock, PyGLinearBlock
 from torch_kfac.layers.fisher_block_factory import FisherBlockFactory
+
+import torch.nn.functional as F
+from torch.nn import BatchNorm1d
+from torch.nn import Sequential, Linear, ReLU
+from torch_geometric.nn import GINConv, global_add_pool, global_mean_pool
+
+
+class GIN(torch.nn.Module):
+
+    #def __init__(self, dim_features, dim_target, config):
+    def __init__(self, in_channels, hidden_channels, out_channels, num_layers, dropout):
+        super(GIN, self).__init__()
+
+        self.dropout = dropout
+        self.embeddings_dim = [hidden_channels] * num_layers
+        self.num_layers = num_layers
+        self.first_h = []
+        self.nns = []
+        self.convs = []
+        self.linears = []
+
+        train_eps = True
+
+        self.pooling = global_mean_pool
+
+        for layer, out_emb_dim in enumerate(self.embeddings_dim):
+
+            if layer == 0:
+                self.first_h = Sequential(Linear(in_channels, out_emb_dim), BatchNorm1d(out_emb_dim), ReLU(),
+                                    Linear(out_emb_dim, out_emb_dim), BatchNorm1d(out_emb_dim), ReLU())
+                self.linears.append(Linear(out_emb_dim, out_channels))
+            else:
+                input_emb_dim = self.embeddings_dim[layer-1]
+                self.nns.append(Sequential(Linear(input_emb_dim, out_emb_dim), BatchNorm1d(out_emb_dim), ReLU(),
+                                      Linear(out_emb_dim, out_emb_dim), BatchNorm1d(out_emb_dim), ReLU()))
+                self.convs.append(GINConv(self.nns[-1], train_eps=train_eps))  # Eq. 4.2
+
+                self.linears.append(Linear(out_emb_dim, out_channels))
+
+        self.nns = torch.nn.ModuleList(self.nns)
+        self.convs = torch.nn.ModuleList(self.convs)
+        self.linears = torch.nn.ModuleList(self.linears)  # has got one more for initial input
+
+    def forward(self, x, edge_index, batch):
+        #x, edge_index, batch = data.x, data.edge_index, data.batch
+
+        out = 0
+
+        for layer in range(self.num_layers):
+            if layer == 0:
+                x = self.first_h(x)
+                out += F.dropout(self.pooling(self.linears[layer](x), batch), p=self.dropout)
+            else:
+                # Layer l ("convolution" layer)
+                x = self.convs[layer-1](x, edge_index)
+                out += F.dropout(self.linears[layer](self.pooling(x, batch)), p=self.dropout, training=self.training)
+
+        return out
+
+
 
 class GAT(Module):
     def __init__(self, in_channels, hidden_channels, out_channels, heads, dropout, hidden_layers):
@@ -247,7 +307,7 @@ if __name__ == '__main__':
 
     dataset = TUDataset(root=root, name=args.dataset_name)
 
-    args.kfac_damping = [float(damping) if damping != "None" else None for damping in args.kfac_damping]
+    args.kfac_damping = [float(damping) if (damping != "None" and damping is not None) else None for damping in args.kfac_damping]
 
     dataset_args = {"use_node_attr": False, "transform": None}
     # Update `dataset_args` based on `dataset_name`
