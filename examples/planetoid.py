@@ -16,6 +16,7 @@ import torch_geometric.transforms as T
 import torch.nn.functional as F
 from tqdm.auto import tqdm
 
+import MFAC.optim
 from examples.filter_blocks import FilterBlocksFactory
 from plot_utils import plot_training, find_filename
 from gat_conv import GATConv
@@ -178,6 +179,9 @@ def train(model, optimizer, data, preconditioner, update_cov):
             model.eval() # need to set to eval mode otherwise model is not deterministic.
             preconditioner.step(lambda: model_forward(model), test_deterministic=True)
             model.train()
+        if isinstance(preconditioner, MFAC.optim.MFAC):
+            preconditioner.step()
+
     optimizer.step()
 
 
@@ -252,6 +256,9 @@ def train_model(dataset, args: argparse.Namespace, device):
     elif args.baseline in ["Hessian", "GGN"] and not enable_kfac:
         preconditioner = HessianFree(model.parameters(), verbose=False, curvature_opt=args.baseline, cg_max_iter=1000,
                                 lr=0.0, damping=args.hessianfree_damping, adapt_damping=args.baseline == "Hessian")
+    elif args.baseline == "M-FAC" and not enable_kfac:
+        from MFAC.optim import MFAC
+        preconditioner = MFAC(model.parameters(), lr=0.0, moddev=device, optdev=device)
 
     if preconditioner is not None:
         print(f"Preconditioner: {preconditioner.__class__}")
@@ -277,7 +284,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--dataset', type=str, default='Cora')
     parser.add_argument('--model', type=str, required=True, choices=["GAT", "GCN"])
-    parser.add_argument('--baseline', choices=['ADAM', 'Hessian', 'GGN'], default='ADAM')
+    parser.add_argument('--baseline', choices=['ADAM', 'Hessian', 'GGN', 'M-FAC'], default='ADAM')
     parser.add_argument('--hidden_channels', type=int, default=64)
     parser.add_argument('--hidden_layers', type=int, default=1)
     parser.add_argument('--heads', type=int, default=8)
