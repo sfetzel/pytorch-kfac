@@ -258,7 +258,8 @@ def train_model(dataset, args: argparse.Namespace, device):
                                 lr=0.0, damping=args.hessianfree_damping, adapt_damping=args.baseline == "Hessian")
     elif args.baseline == "M-FAC" and not enable_kfac:
         from MFAC.optim import MFAC
-        preconditioner = MFAC(model.parameters(), lr=0.0, moddev=device, optdev=device)
+        preconditioner = MFAC(model.parameters(), lr=0.0, moddev=device, optdev=device,
+                              damp=args.mfac_damping)
 
     if preconditioner is not None:
         print(f"Preconditioner: {preconditioner.__class__}")
@@ -294,6 +295,7 @@ if __name__ == "__main__":
     parser.add_argument('--epochs', type=int, default=200)
     parser.add_argument('--kfac_damping', type=float, default=0.1)
     parser.add_argument('--hessianfree_damping', type=float, default=0.1)
+    parser.add_argument('--mfac_damping', type=float, default=0.1)
     parser.add_argument('--dropout', type=float, default=0.5)
     parser.add_argument('--cov_update_freq', type=int, default=1)
     parser.add_argument('--runs', type=int, default=2)
@@ -323,7 +325,8 @@ if __name__ == "__main__":
         "heads": args.heads,
         "cov_ema_decay": args.cov_ema_decay,
         "cov_update_freq": args.cov_update_freq,
-        "epochs": args.epochs
+        "epochs": args.epochs,
+        "mfac_damping": args.mfac_damping
     }
 
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
