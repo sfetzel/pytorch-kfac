@@ -28,10 +28,10 @@ for filename in filenames:
         adam_flops_per_epoch = result_json["results"]["ADAM"]["flops_per_epoch"]
         adam_min_time_per_epoch = adam_flops_per_epoch / max_flops
 
+        adam_best_epoch = result_json["results"]["ADAM"]["best_epoch_mean"]
         if adam_flops_per_epoch is not None:
-            best_epoch = result_json["results"]["ADAM"]["best_epoch_mean"]
             adam_efficiency = (adam_min_time_per_epoch * epochs) / train_adam_mean * 100
-            adam_flops_best_epoch = adam_flops_per_epoch * best_epoch
+            adam_flops_best_epoch = adam_flops_per_epoch * adam_best_epoch
 
         train_kfac_mean = result_json["results"]["K-FAC"]["train_time_mean"]
         train_kfac_std = result_json["results"]["K-FAC"]["train_time_std"]
@@ -39,11 +39,11 @@ for filename in filenames:
         epochs_for_efficiency = result_json["results"]["K-FAC"]["best_epoch_mean"]
         kfac_efficiency = ""
         kfac_flops_best_epoch = ""
+        kfac_best_epoch = result_json["results"]["K-FAC"]["best_epoch_mean"]
         kfac_flops_per_epoch = result_json["results"]["K-FAC"]["flops_per_epoch"]
         if kfac_flops_per_epoch is not None:
             kfac_min_time_per_epoch = (result_json["results"]["K-FAC"]["flops_per_epoch"]) / max_flops
-            best_epoch = result_json["results"]["K-FAC"]["best_epoch_mean"]
-            kfac_flops_best_epoch = kfac_flops_per_epoch * best_epoch
+            kfac_flops_best_epoch = kfac_flops_per_epoch * kfac_best_epoch
             kfac_efficiency = (kfac_min_time_per_epoch * epochs) / train_kfac_mean * 100
 
         results.append([
@@ -63,6 +63,7 @@ for filename in filenames:
             round(kfac_flops_best_epoch / adam_flops_best_epoch, time_digits) if kfac_flops_best_epoch != "" else "",
             round(kfac_efficiency, time_digits) if kfac_efficiency != "" else "",
             round(kfac_flops_best_epoch / 10**9, time_digits) if kfac_flops_best_epoch != "" else "",
+            round((train_kfac_mean / float(epochs) * kfac_best_epoch) / (train_adam_mean / float(epochs) * adam_best_epoch), 3)
         ])
 
 df = pandas.DataFrame(results, columns=[
@@ -82,6 +83,7 @@ df = pandas.DataFrame(results, columns=[
     "kfac-flops-ratio",
     "kfac-efficiency",
     "kfac-gflops-best-epoch",
+    "kfac-time-ratio-best-epoch"
 ], index=None).sort_values(by=["dataset", "model"])
 df.to_csv(os.path.join(base_dir, "efficiency.csv"), index=False)
 df
