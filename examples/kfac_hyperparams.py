@@ -70,9 +70,9 @@ if __name__ == "__main__":
 
     if args.experiment == "decay":
         _, _, fig, group_results = plot_training(args.epochs, args.runs, plot_training_train_model, [
-            {"cov_ema_decay": 0.0, "kfac_damping": args.kfac_damping, "cov_update_freq": 1,},
-            {"cov_ema_decay": 0.2, "kfac_damping": args.kfac_damping, "cov_update_freq": 1},
-            {"cov_ema_decay": 0.5, "kfac_damping": args.kfac_damping, "cov_update_freq": 1},
+            {"cov_ema_decay": 0.0, "kfac_damping": 0.1, "cov_update_freq": 1,},
+            {"cov_ema_decay": 0.2, "kfac_damping": 0.1, "cov_update_freq": 1},
+            {"cov_ema_decay": 0.5, "kfac_damping": 0.1, "cov_update_freq": 1},
         ], ['$\\gamma=0.1$', '$\\gamma=0.01$', '$\\gamma=0.001$'], loss_range=(0, 2))
     elif args.experiment == "damping":
         _, _, fig, group_results = plot_training(args.epochs, args.runs, plot_training_train_model, [
