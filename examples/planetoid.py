@@ -255,7 +255,7 @@ def train_model(dataset, args: argparse.Namespace, device):
     elif args.baseline in ["Hessian", "GGN"] and not enable_kfac:
         curvature_opt = "hessian" if args.baseline == "Hessian" else "ggn"
         preconditioner = HessianFree(model.parameters(), verbose=False, curvature_opt=curvature_opt, cg_max_iter=1000,
-                                lr=0.0, damping=args.hessianfree_damping, adapt_damping=args.baseline != "Hessian")
+                                lr=0.0, damping=args.hessianfree_damping, adapt_damping=False)
     elif args.baseline == "M-FAC" and not enable_kfac:
         from MFAC.optim import MFAC
         preconditioner = MFAC(model.parameters(), lr=0.0, moddev=device, optdev=device,
