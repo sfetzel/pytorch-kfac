@@ -29,9 +29,9 @@ for result_filename in result_files:
                 if existing_results:
                     print(f"Found existing results for {model}-{dataset}: {existing_results[0]}")
                     results = json.load(open(join(results_dir, existing_results[0]), "r"))
-                    adam_results = results["results"]["adam"]
+                    adam_results = results["results"]["ADAM"]
                     # original KFAC results without hyperparameter gridsearch.
-                    kfac_results = results["results"]["KFAC"]
+                    kfac_results = results["results"]["K-FAC"]
                     best_val_config = df.iloc[df["val_acc_mean"].idxmax()]
                     best_results.append([
                         model,
