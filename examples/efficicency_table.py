@@ -19,30 +19,30 @@ for filename in filenames:
         #epochs = result_json["experiment"]["epochs"]
         dataset = result_json["experiment"]["dataset"]
         epochs = result_json["experiment"]["epochs"]
-        train_adam_mean = result_json["results"]["adam"]["train_time_mean"]
-        train_adam_std = result_json["results"]["adam"]["train_time_std"]
+        train_adam_mean = result_json["results"]["ADAM"]["train_time_mean"]
+        train_adam_std = result_json["results"]["ADAM"]["train_time_std"]
         # FLOPs / (FLOPs/s) = s.
         adam_efficiency = ""
         adam_flops_best_epoch = ""
 
-        adam_flops_per_epoch = result_json["results"]["adam"]["flops_per_epoch"]
+        adam_flops_per_epoch = result_json["results"]["ADAM"]["flops_per_epoch"]
         adam_min_time_per_epoch = adam_flops_per_epoch / max_flops
 
         if adam_flops_per_epoch is not None:
-            best_epoch = result_json["results"]["adam"]["best_epoch_mean"]
+            best_epoch = result_json["results"]["ADAM"]["best_epoch_mean"]
             adam_efficiency = (adam_min_time_per_epoch * epochs) / train_adam_mean * 100
             adam_flops_best_epoch = adam_flops_per_epoch * best_epoch
 
-        train_kfac_mean = result_json["results"]["KFAC"]["train_time_mean"]
-        train_kfac_std = result_json["results"]["KFAC"]["train_time_std"]
+        train_kfac_mean = result_json["results"]["K-FAC"]["train_time_mean"]
+        train_kfac_std = result_json["results"]["K-FAC"]["train_time_std"]
 
-        epochs_for_efficiency = result_json["results"]["KFAC"]["best_epoch_mean"]
+        epochs_for_efficiency = result_json["results"]["K-FAC"]["best_epoch_mean"]
         kfac_efficiency = ""
         kfac_flops_best_epoch = ""
-        kfac_flops_per_epoch = result_json["results"]["KFAC"]["flops_per_epoch"]
+        kfac_flops_per_epoch = result_json["results"]["K-FAC"]["flops_per_epoch"]
         if kfac_flops_per_epoch is not None:
-            kfac_min_time_per_epoch = (result_json["results"]["KFAC"]["flops_per_epoch"]) / max_flops
-            best_epoch = result_json["results"]["KFAC"]["best_epoch_mean"]
+            kfac_min_time_per_epoch = (result_json["results"]["K-FAC"]["flops_per_epoch"]) / max_flops
+            best_epoch = result_json["results"]["K-FAC"]["best_epoch_mean"]
             kfac_flops_best_epoch = kfac_flops_per_epoch * best_epoch
             kfac_efficiency = (kfac_min_time_per_epoch * epochs) / train_kfac_mean * 100
 
