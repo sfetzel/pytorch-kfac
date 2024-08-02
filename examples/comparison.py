@@ -95,8 +95,7 @@ class GIN(torch.nn.Module):
 
 
 class GAT(Module):
-    def __init__(self, in_channels, hidden_channels, out_channels, heads, dropout, hidden_layers,
-                 aggregation):
+    def __init__(self, in_channels, hidden_channels, out_channels, heads, dropout, hidden_layers):
         super().__init__()
         self.convs = ModuleList()
         for _ in range(hidden_layers):
@@ -162,9 +161,9 @@ class Patience:
                 return self.counter >= self.patience
 
 
-def train(model, data, y, criterion, optimizer, scheduler, preconditioner, enable_preconditioner):
+def train(model, data, y, criterion, optimizer, scheduler, preconditioner, enable_preconditioner, epoch):
     optimizer.zero_grad()
-    if enable_preconditioner:
+    if enable_preconditioner and epoch % 50 == 0:
         with preconditioner.track_forward():
             output = model(data.x, data.edge_index, data.batch)
             loss_train = criterion(output, y.to(output.device))
@@ -177,6 +176,10 @@ def train(model, data, y, criterion, optimizer, scheduler, preconditioner, enabl
 
     if enable_preconditioner:
         try:
+            if epoch % 50 == 0:
+               print(f"Update cov {epoch}")
+               preconditioner.update_cov()
+
             preconditioner.step(loss_train)
         except:
             print("Problem in KFAC preconditioner! Continuing without")
@@ -194,13 +197,13 @@ def eval(model, data, y, criterion):
 
 
 def train_and_validate_model(model, train_loader, val_loader, criterion, optimizer, scheduler, device, preconditioner,
-                             enable_preconditioner):
+                             enable_preconditioner, epoch):
     train_loss = 0
     train_correct = 0
     model.train()
     for idx, data in enumerate(train_loader):
         data = data.to(device)
-        output, loss = train(model, data, data.y, criterion, optimizer, scheduler, preconditioner, enable_preconditioner)
+        output, loss = train(model, data, data.y, criterion, optimizer, scheduler, preconditioner, enable_preconditioner, epoch)
         train_loss += loss.item() * data.num_graphs
         prediction = output.max(1)[1].type_as(data.y)
         train_correct += prediction.eq(data.y.double()).sum().item()
@@ -366,7 +369,7 @@ if __name__ == '__main__':
 
     np.random.seed(10)
     torch_random.manual_seed(10)
-    preconditioner_args = {"momentum": 0}
+    preconditioner_args = {"momentum": 0, "update_cov_manually":True}
 
     for it in range(10):
         # it corresponds to the fold.
@@ -435,7 +438,7 @@ if __name__ == '__main__':
                                                                                                             optimizer, scheduler,
                                                                                                             device,
                                                                                                             preconditioner,
-                                                                                                            kfac_damping is not None
+                                                                                                            kfac_damping is not None, epoch
                                                                                                             )
 
                                         if early_stopper.stop(epoch, val_loss, val_acc):
@@ -505,7 +508,7 @@ if __name__ == '__main__':
                 train_acc, train_loss, val_acc, val_loss = train_and_validate_model(model, train_loader, val_loader,
                                                                                     criterion, optimizer, scheduler,
                                                                                     device, preconditioner,
-                                                                                    kfac_damping is not None)
+                                                                                    kfac_damping is not None, epoch)
 
                 if early_stopper.stop(epoch, val_loss, val_acc, model=model):
                     break
