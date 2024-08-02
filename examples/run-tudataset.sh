@@ -1,7 +1,7 @@
 #!/bin/bash
 DAMPING="0.1 None"
 DEVICE=cuda:0
-EPOCHS=1000
+EPOCHS=200
 PATIENCE=500
 
 python comparison.py --kfac_damping $DAMPING --device=$DEVICE --epochs=$EPOCHS --patience $PATIENCE --dataset_name=PROTEINS --model=GIN > comparison-gin-proteins.txt;
