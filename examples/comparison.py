@@ -3,7 +3,6 @@ import os
 import json
 from pathlib import Path
 from collections import defaultdict
-import traceback
 
 import requests
 import argparse
@@ -39,7 +38,8 @@ from torch_geometric.nn import GINConv, global_add_pool, global_mean_pool
 class GIN(torch.nn.Module):
 
     #def __init__(self, dim_features, dim_target, config):
-    def __init__(self, in_channels, hidden_channels, out_channels, num_layers, dropout):
+    def __init__(self, in_channels, hidden_channels, out_channels, num_layers, dropout,
+                 aggregation):
         super(GIN, self).__init__()
 
         self.dropout = dropout
@@ -52,7 +52,11 @@ class GIN(torch.nn.Module):
 
         train_eps = True
 
-        self.pooling = global_add_pool
+        self.pooling = None
+        if aggregation == "mean":
+            self.pooling = global_mean_pool
+        elif aggregation == "sum":
+            self.pooling = global_add_pool
 
         for layer, out_emb_dim in enumerate(self.embeddings_dim):
 
@@ -100,11 +104,17 @@ class GAT(Module):
         self.conv_last = GATConv(hidden_channels * heads, out_channels, heads=1,
                              concat=False, dropout=dropout)
 
+        self.pooling = None
+        if aggregation == "mean":
+            self.pooling = global_mean_pool
+        elif aggregation == "sum":
+            self.pooling = global_add_pool
+
     def forward(self, x, edge_index, batch):
         for conv in self.convs:
             x = F.elu(conv(x, edge_index))
         x = self.conv_last(x, edge_index)
-        x = global_add_pool(x, batch)
+        x = self.pooling(x, batch)
         return x
 
 class Patience:
@@ -264,14 +274,15 @@ def compute_max_degree(dataset):
     return max_degree
 
 
-def get_model(model_str: str, args, dataset, hidden_channels, num_layers, dropout) -> Module:
+def get_model(model_str: str, args, dataset, hidden_channels, num_layers, dropout, aggregation) -> Module:
     if model_str == "GIN":
         return GIN(
             in_channels=dataset.num_features,
             hidden_channels=hidden_channels,
             out_channels=dataset.num_classes,
             num_layers=num_layers,
-            dropout=dropout
+            dropout=dropout,
+            aggregation=aggregation
         )
     elif model_str == "GAT":
         return GAT(in_channels=dataset.num_features,
@@ -279,7 +290,8 @@ def get_model(model_str: str, args, dataset, hidden_channels, num_layers, dropou
                    out_channels=dataset.num_classes,
                    heads=args.heads,
                    dropout=dropout,
-                   hidden_layers=num_layers-1)
+                   hidden_layers=num_layers-1,
+                   aggregation=aggregation)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -294,7 +306,7 @@ if __name__ == '__main__':
     # for proof of concept: without reporting accuracies
     parser.add_argument("--kfac_damping", nargs="+", default=[0.1, None])# None, 0.01, 1e-7
     parser.add_argument("--weight_decay", type=float, nargs="+", default=[0.0005, 0.0])
-
+    parser.add_argument("--aggregation", type=str, nargs="+", default=["mean", "sum"])
     parser.add_argument("--dropout", type=int, nargs="+", default=[0.0, 0.5])
     parser.add_argument("--epochs", type=int, default=500)
     parser.add_argument("--runs", type=int, default=3)
@@ -371,7 +383,7 @@ if __name__ == '__main__':
         best_acc_across_folds = -float(np.inf)
         best_loss_across_folds = float(np.inf)
 
-        n_params = len(args.dim_embeddings) * len(args.lrs) * len(args.kfac_damping) * len(args.layers) * len(args.dropout) * len(args.weight_decay)
+        n_params = len(args.dim_embeddings) * len(args.lrs) * len(args.kfac_damping) * len(args.layers) * len(args.dropout) * len(args.weight_decay) * len(args.aggregation)
         model_selection_epochs = args.epochs
         if n_params == 1:
             print(f"Only one configuration to search for, skipping model selection (train for one epoch)")
@@ -382,70 +394,83 @@ if __name__ == '__main__':
                     for layers in args.layers:
                         for dropout in args.dropout:
                             for weight_decay in args.weight_decay:
-                                ################################
-                                #       MODEL SELECTION       #
-                                ###############################
-                                train_loader, val_loader, test_loader = get_train_val_test_loaders(dataset,
-                                                                                                   train_index,
-                                                                                                   val_index,
-                                                                                                   test_index,
-                                                                                                   )
+                                for aggregation in args.aggregation:
+                                    ################################
+                                    #       MODEL SELECTION       #
+                                    ###############################
+                                    train_loader, val_loader, test_loader = get_train_val_test_loaders(dataset,
+                                                                                                       train_index,
+                                                                                                       val_index,
+                                                                                                       test_index,
+                                                                                                       )
 
-                                early_stopper = Patience(patience=args.patience, use_loss=False)
-                                # dont forget to add hyperparameters here.
-                                params = {"dim_embedding": dim_embedding, "lr": lr, "dropout": dropout,
-                                          "layers": layers, "kfac_damping": kfac_damping,
-                                          "weight_decay": weight_decay}
+                                    early_stopper = Patience(patience=args.patience, use_loss=False)
+                                    # dont forget to add hyperparameters here.
+                                    params = {"dim_embedding": dim_embedding, "lr": lr, "dropout": dropout,
+                                              "layers": layers, "kfac_damping": kfac_damping,
+                                              "weight_decay": weight_decay, "aggregation": aggregation}
 
-                                best_val_loss, best_val_acc = float("inf"), 0
-                                epoch, val_loss, val_acc = 0, float("inf"), 0
+                                    best_val_loss, best_val_acc = float("inf"), 0
+                                    epoch, val_loss, val_acc = 0, float("inf"), 0
 
-                                model = get_model(args.model, args, dataset, dim_embedding, layers, dropout)
+                                    model = get_model(args.model, args, dataset, dim_embedding, layers, dropout, aggregation)
 
-                                model = model.to(device)
+                                    model = model.to(device)
 
-                                print(f"Model # Parameters {sum([p.numel() for p in model.parameters()])}")
-                                optimizer = Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
-                                scheduler = StepLR(optimizer, step_size=args.step_size, gamma=0.5)
-                                # we can use the regular preconditioning blocks, because
-                                # only the training data is used for the loss.
-                                factory = FisherBlockFactory()
-                                preconditioner = KFAC(model, 0, kfac_damping if kfac_damping is not None else 0, **preconditioner_args,
-                                                      block_factory=factory)
-                                if kfac_damping is not None:
-                                    linear_blocks = sum(1 for block in preconditioner.blocks if isinstance(block, FullyConnectedFisherBlock))
-                                    print(f"Preconditioning active on {linear_blocks} blocks.")
-                                else:
-                                    print("Preconditioning inactive.")
+                                    print(f"Model # Parameters {sum([p.numel() for p in model.parameters()])}")
+                                    optimizer = Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
+                                    scheduler = StepLR(optimizer, step_size=args.step_size, gamma=0.5)
+                                    # we can use the regular preconditioning blocks, because
+                                    # only the training data is used for the loss.
+                                    factory = FisherBlockFactory()
+                                    preconditioner = KFAC(model, 0, kfac_damping if kfac_damping is not None else 0, **preconditioner_args,
+                                                          block_factory=factory)
+                                    if kfac_damping is not None:
+                                        linear_blocks = sum(1 for block in preconditioner.blocks if isinstance(block, FullyConnectedFisherBlock))
+                                        print(f"Preconditioning active on {linear_blocks} blocks.")
+                                    else:
+                                        print("Preconditioning inactive.")
 
-                                pbar_train = tqdm(range(model_selection_epochs), desc="Epoch 0 Loss 0")
-                                for epoch in pbar_train:
-                                    train_acc, train_loss, val_acc, val_loss = train_and_validate_model(model, train_loader,
-                                                                                                        val_loader, criterion,
-                                                                                                        optimizer, scheduler,
-                                                                                                        device,
-                                                                                                        preconditioner,
-                                                                                                        kfac_damping is not None, epoch
-                                                                                                        )
+                                    pbar_train = tqdm(range(model_selection_epochs), desc="Epoch 0 Loss 0")
+                                    for epoch in pbar_train:
+                                        train_acc, train_loss, val_acc, val_loss = train_and_validate_model(model, train_loader,
+                                                                                                            val_loader, criterion,
+                                                                                                            optimizer, scheduler,
+                                                                                                            device,
+                                                                                                            preconditioner,
+                                                                                                            kfac_damping is not None, epoch
+                                                                                                            )
 
-                                    if early_stopper.stop(epoch, val_loss, val_acc):
-                                        break
+                                        if early_stopper.stop(epoch, val_loss, val_acc):
+                                            break
 
-                                    best_acc_across_folds = early_stopper.val_acc if early_stopper.val_acc > best_acc_across_folds else best_acc_across_folds
-                                    best_loss_across_folds = early_stopper.val_loss if early_stopper.val_loss < best_loss_across_folds else best_loss_across_folds
+                                        best_acc_across_folds = early_stopper.val_acc if early_stopper.val_acc > best_acc_across_folds else best_acc_across_folds
+                                        best_loss_across_folds = early_stopper.val_loss if early_stopper.val_loss < best_loss_across_folds else best_loss_across_folds
 
-                                    pbar_train.set_description(f"MS {loop_counter}/{n_params} Epoch {epoch + 1} Val loss {val_loss:0.2f} Val acc {val_acc:0.1f} Best Val Loss {early_stopper.val_loss:0.2f} Best Val Acc {early_stopper.val_acc:0.1f} Best Fold Val Acc  {best_acc_across_folds:0.1f} Best Fold Val Loss {best_loss_across_folds:0.2f}")
+                                        pbar_train.set_description(f"MS {loop_counter}/{n_params} Epoch {epoch + 1} Val loss {val_loss:0.2f} Val acc {val_acc:0.1f} Best Val Loss {early_stopper.val_loss:0.2f} Best Val Acc {early_stopper.val_acc:0.1f} Best Fold Val Acc  {best_acc_across_folds:0.1f} Best Fold Val Loss {best_loss_across_folds:0.2f}")
 
-                                best_val_loss, best_val_acc = early_stopper.val_loss, early_stopper.val_acc
+                                    best_val_loss, best_val_acc = early_stopper.val_loss, early_stopper.val_acc
 
-                                result_dict["config"].append(params)
-                                result_dict["best_val_acc"].append(best_val_acc)
-                                result_dict["best_val_loss"].append(best_val_loss)
-                                print(f"MS {loop_counter}/{n_params} Epoch {epoch + 1} Best Epoch {early_stopper.best_epoch} Val acc {val_acc:0.1f} Best Val Acc {best_val_acc:0.2f} Best Fold Val Acc  {best_acc_across_folds:0.2f} Best Fold Val Loss {best_loss_across_folds:0.2f}")
+                                    result_dict["config"].append(params)
+                                    result_dict["best_val_acc"].append(best_val_acc)
+                                    result_dict["best_val_loss"].append(best_val_loss)
+                                    print(f"MS {loop_counter}/{n_params} Epoch {epoch + 1} Best Epoch {early_stopper.best_epoch} Val acc {val_acc:0.1f} Best Val Acc {best_val_acc:0.2f} Best Fold Val Acc  {best_acc_across_folds:0.2f} Best Fold Val Loss {best_loss_across_folds:0.2f}")
 
-                                loop_counter += 1
-                                gc.collect()
-                                torch.cuda.empty_cache()
+                                    test_count = 0
+                                    test_correct = 0
+                                    for idx, data in enumerate(test_loader):
+                                        data = data.to(device)
+                                        output, loss = eval(model, data, data.y, criterion)
+                                        test_count += output.size(0)
+                                        prediction = output.max(1)[1].type_as(data.y)
+                                        test_correct += prediction.eq(data.y.double()).sum().item()
+
+                                    test_accuracy = (test_correct / test_count) * 100
+                                    print(f"Test acc {test_accuracy:0.2f}, f{params}")
+
+                                    loop_counter += 1
+                                    gc.collect()
+                                    torch.cuda.empty_cache()
 
         # Free memory after model selection
         del model
