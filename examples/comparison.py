@@ -480,7 +480,7 @@ if __name__ == '__main__':
         ###############################
         # train with best configuration here.
 
-        best_i = np.argmax(result_dict["best_val_loss"])
+        best_i = np.argmin(result_dict["best_val_loss"])
         best_config = result_dict["config"][best_i]
         best_val_acc = result_dict["best_val_acc"][best_i]
         print(best_config)
