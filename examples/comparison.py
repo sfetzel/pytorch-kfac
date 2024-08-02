@@ -312,6 +312,7 @@ if __name__ == '__main__':
     parser.add_argument("--patience", type=int, default=250)
     parser.add_argument("--step_size", type=int, default=100)
     parser.add_argument("--batch_size", type=int, default=128)
+    parser.add_argument("--model_selection_metric", type=str, default="accuracy", choices=["accuracy", "loss"])
     parser.add_argument("--device", type=str, default="cuda" if cuda.is_available() else "cpu")
     parser.add_argument("--heads", type=int, default=8, help='Heads for GAT')
     parser.add_argument('--model', type=str, required=True, choices=["GIN", "GAT"])
@@ -479,8 +480,10 @@ if __name__ == '__main__':
         #       MODEL ASSESSMENT      #
         ###############################
         # train with best configuration here.
-
-        best_i = np.argmin(result_dict["best_val_loss"])
+        if args.model_selection_metric == "accuracy":
+            best_i = np.argmax(result_dict["best_val_acc"])
+        elif args.model_selection_metric == "loss":
+            best_i = np.argmin(result_dict["best_val_loss"])
         best_config = result_dict["config"][best_i]
         best_val_acc = result_dict["best_val_acc"][best_i]
         print(best_config)
