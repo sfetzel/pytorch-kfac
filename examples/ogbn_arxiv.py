@@ -173,7 +173,7 @@ def train(model, data, train_idx, optimizer, preconditioner, enable_kfac, update
     model.train()
 
     optimizer.zero_grad()
-    if enable_kfac:
+    if enable_kfac and update_cov:
         with preconditioner.track_forward():
             out = model(data.x, data.adj_t)[train_idx]
             loss = F.nll_loss(out, data.y.squeeze(1)[train_idx])
@@ -182,12 +182,14 @@ def train(model, data, train_idx, optimizer, preconditioner, enable_kfac, update
 
         if update_cov:
             preconditioner.update_cov()
-        preconditioner.step(loss)
     else:
         torch.autograd.set_detect_anomaly(True)
         out = model(data.x, data.adj_t)[train_idx]
         loss = F.nll_loss(out, data.y.squeeze(1)[train_idx])
         loss.backward()
+
+    if enable_kfac:
+        preconditioner.step(loss)
 
     optimizer.step()
 
@@ -236,7 +238,7 @@ if __name__ == "__main__":
     parser.add_argument('--results_dir', type=str, default="results")
     parser.add_argument('--file_name', type=str, default=None)
     parser.add_argument('--heads', type=int, default=8)
-    parser.add_argument('--cov_update_freq', type=int, default=1)
+    parser.add_argument('--cov_update_freq', type=int, default=50)
     parser.add_argument('--weight_decay', type=float, default=0.0)
 
     args = parser.parse_args()
@@ -321,7 +323,7 @@ def train_model(args, device):
 
     losses, val_accuracies, test_accuracies, train_accuracies = [], [], [], []
     for epoch in range(1, 1 + args.epochs):
-        loss = train(model, data, train_idx, optimizer, preconditioner, enable_kfac, epoch % args.cov_update_freq == 0)
+        loss = train(model, data, train_idx, optimizer, preconditioner, enable_kfac, (epoch-1) % args.cov_update_freq == 0)
         result = test(model, data, split_idx, evaluator)
 
         if epoch % args.log_steps == 0:
