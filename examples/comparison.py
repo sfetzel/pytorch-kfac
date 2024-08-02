@@ -177,7 +177,6 @@ def train(model, data, y, criterion, optimizer, scheduler, preconditioner, enabl
     if enable_preconditioner:
         try:
             if epoch % 50 == 0:
-               print(f"Update cov {epoch}")
                preconditioner.update_cov()
 
             preconditioner.step(loss_train)
@@ -466,7 +465,7 @@ if __name__ == '__main__':
                                         test_correct += prediction.eq(data.y.double()).sum().item()
 
                                     test_accuracy = (test_correct / test_count) * 100
-                                    print(f"Test acc {test_accuracy:0.2f}, f{params}")
+                                    print(f"Val acc {best_val_acc:0.2f}, Test acc {test_accuracy:0.2f}, f{params}")
 
                                     loop_counter += 1
                                     gc.collect()
@@ -481,7 +480,7 @@ if __name__ == '__main__':
         ###############################
         # train with best configuration here.
 
-        best_i = np.argmax(result_dict["best_val_acc"])
+        best_i = np.argmax(result_dict["best_val_loss"])
         best_config = result_dict["config"][best_i]
         best_val_acc = result_dict["best_val_acc"][best_i]
         print(best_config)
@@ -491,7 +490,8 @@ if __name__ == '__main__':
         test_accuracies = []
         for _ in range(args.runs):
             # use best_config here!
-            model = get_model(args.model, args, dataset, best_config["dim_embedding"], best_config["layers"], best_config["dropout"])
+            model = get_model(args.model, args, dataset, best_config["dim_embedding"], best_config["layers"], best_config["dropout"],
+                              best_config["aggregation"])
 
             model = model.to(device)
             optimizer = Adam(model.parameters(), lr=best_config["lr"], weight_decay=best_config["weight_decay"])
