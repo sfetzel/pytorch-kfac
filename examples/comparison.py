@@ -24,7 +24,7 @@ from torch_geometric.datasets import TUDataset
 from torch_geometric.loader import DataLoader
 
 from examples.gat_conv import GATConv
-#from gin import GIN
+import gin as gin_simple
 from torch_kfac import KFAC
 from torch_kfac.layers import FullyConnectedFisherBlock, PyGLinearBlock
 from torch_kfac.layers.fisher_block_factory import FisherBlockFactory
@@ -274,15 +274,19 @@ def compute_max_degree(dataset):
 
 
 def get_model(model_str: str, args, dataset, hidden_channels, num_layers, dropout, aggregation) -> Module:
-    if model_str == "GIN":
-        return GIN(
-            in_channels=dataset.num_features,
-            hidden_channels=hidden_channels,
-            out_channels=dataset.num_classes,
-            num_layers=num_layers,
-            dropout=dropout,
-            aggregation=aggregation
-        )
+    if model_str == "GIN" or model_str == "GIN-simple":
+        gin_args = {
+            "in_channels": dataset.num_features,
+            "hidden_channels": hidden_channels,
+            "out_channels": dataset.num_classes,
+            "num_layers": num_layers,
+            "dropout": dropout,
+            "aggregation": aggregation
+        }
+        if model_str == "GIN-simple":
+            return gin_simple.GIN(**gin_args)
+        else:
+            return GIN(**gin_args)
     elif model_str == "GAT":
         return GAT(in_channels=dataset.num_features,
                    hidden_channels=hidden_channels,
@@ -315,7 +319,7 @@ if __name__ == '__main__':
     parser.add_argument("--model_selection_metric", type=str, default="accuracy", choices=["accuracy", "loss"])
     parser.add_argument("--device", type=str, default="cuda" if cuda.is_available() else "cpu")
     parser.add_argument("--heads", type=int, default=8, help='Heads for GAT')
-    parser.add_argument('--model', type=str, required=True, choices=["GIN", "GAT"])
+    parser.add_argument('--model', type=str, required=True, choices=["GIN", "GIN-simple", "GAT"])
     args = parser.parse_args()
 
     device = torch_device(args.device) if all([args.device[:4] == "cuda", cuda.is_available()]) else torch_device("cpu")
