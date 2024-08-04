@@ -10,7 +10,7 @@ from torch.nn import Sequential, Linear, ReLU, Dropout
 from torch_geometric.datasets import TUDataset
 from torch_geometric.loader import DataLoader
 from torch_geometric.logging import init_wandb, log
-from torch_geometric.nn import MLP, GINConv, global_add_pool, BatchNorm
+from torch_geometric.nn import MLP, GINConv, global_mean_pool, BatchNorm, global_add_pool
 from torch_geometric.transforms import RandomLinkSplit
 
 from torch_kfac import KFAC
@@ -20,36 +20,41 @@ from tqdm.auto import tqdm
 
 
 class GIN(torch.nn.Module):
-    def __init__(self, in_channels, hidden_channels, out_channels, num_layers, dropout):
+    def __init__(self, in_channels, hidden_channels, out_channels, num_layers, dropout,
+                 aggregation):
         super().__init__()
+
+        self.pooling = None
+        if aggregation == "mean":
+            self.pooling = global_mean_pool
+        elif aggregation == "sum":
+            self.pooling = global_add_pool
 
         self.convs = torch.nn.ModuleList()
         for _ in range(num_layers):
             # original:
             # mlp = MLP([in_channels, hidden_channels, hidden_channels])
-            mlp = Sequential(Dropout(p=dropout),
-                             Linear(in_channels, hidden_channels),
-                             BatchNorm(hidden_channels),
+            mlp = Sequential(Linear(in_channels, hidden_channels),
                              ReLU(),
-                             Dropout(p=dropout),
-                             Linear(hidden_channels, hidden_channels))
-            self.convs.append(GINConv(nn=mlp, train_eps=False))
+                             Linear(hidden_channels, hidden_channels),
+                             BatchNorm(hidden_channels),
+                             Dropout(dropout)
+                             )
+            self.convs.append(GINConv(nn=mlp, train_eps=True))
             in_channels = hidden_channels
 
         # original:
         #self.mlp = MLP([hidden_channels, hidden_channels, out_channels],
         #               norm=None, dropout=0.5)
-        self.mlp = Sequential(Dropout(dropout),
-                              Linear(hidden_channels, hidden_channels),
+        self.mlp = Sequential(Linear(hidden_channels, hidden_channels),
                               ReLU(),
-                              Dropout(dropout),
-                              Linear(hidden_channels, out_channels),
-                              Dropout(dropout))
+                              Linear(hidden_channels, out_channels)
+                              )
 
     def forward(self, x, edge_index, batch):
         for conv in self.convs:
             x = conv(x, edge_index).relu()
-        x = global_add_pool(x, batch)
+        x = self.pooling(x, batch)
         return self.mlp(x)
 
 
