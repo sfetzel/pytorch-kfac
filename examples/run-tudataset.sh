@@ -6,6 +6,7 @@ PATIENCE=500
 
 model="GIN"
 python comparison.py --kfac_damping $DAMPING --device=$DEVICE --epochs=$EPOCHS --patience $PATIENCE --dataset_name=PROTEINS --model=$model > comparison-$model-proteins.txt;
+python comparison.py --kfac_damping 0.1 --device=$DEVICE --weight_decay 0 0.0005 0.005 --epochs=$EPOCHS --patience $PATIENCE --dataset_name=PROTEINS --model=$model > comparison-$model-proteins-weightdecay.txt;
 python comparison.py --kfac_damping $DAMPING --device=$DEVICE --epochs=$EPOCHS --patience $PATIENCE --dataset_name=ENZYMES --model=$model > comparison-$model-enzymes.txt;
 
 python comparison.py --kfac_damping $DAMPING --device=$DEVICE --epochs=$EPOCHS --patience $PATIENCE --dataset_name=MUTAG --model_selection_metric=loss --model=$model > comparison-$model-mutag.txt;
